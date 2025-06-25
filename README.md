@@ -10,4 +10,4 @@ First, clone the repo to `~/code/tools/gitignore`, then install `gum`.
 
 Link this file as `gi-select` for convenience
 
-![gi-select](./docs/gi-select.png) 
+![gi-select](./docs/gi-select.png)
