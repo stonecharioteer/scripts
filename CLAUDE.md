@@ -19,6 +19,16 @@ Personal utility scripts for automation and file processing tasks. Scripts range
 - Progress indicators for long-running operations
 - Clean, maintainable code structure
 
+## Coding Style & Preferences
+*This section is updated continuously as coding preferences and patterns are observed*
+
+- **Filename conventions**: Use descriptive names with hyphens (e.g., `audiobook-split.sh`)
+- **Progress feedback**: Prioritize user experience with real-time progress indicators
+- **Memory efficiency**: Prefer single-pass processing over parallel when memory is a concern
+- **Compatibility**: Consider older tool versions and provide fallbacks
+- **Documentation**: Comprehensive README updates with features, examples, and technical details
+- **Git workflow**: Feature branches with descriptive commit messages, squash merges preferred
+
 ## Development Log
 
 ### audiobook-split.sh Implementation (Session: 2025-07-01)
