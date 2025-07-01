@@ -8,7 +8,7 @@ DEFAULT_SEGMENT_DURATION=300
 show_help() {
     gum style --foreground="#04B575" --bold "📚 Audiobook Splitter"
     echo
-    gum style --foreground="#7C3AED" "Split audiobooks into smaller segments"
+    gum style --foreground="#7C3AED" "Split audiobooks into smaller segments using ffmpeg's segment muxer"
     echo
     gum style --bold "Usage:"
     echo "  $SCRIPT_NAME <audiobook_file> [segment_duration_in_seconds] [options]"
@@ -121,7 +121,7 @@ split_audiobook() {
     
     gum style --foreground="#7C3AED" "📊 Total duration: $(format_time "$total_duration")"
     gum style --foreground="#7C3AED" "⏱️  Segment duration: $(format_time "$segment_duration")"
-    gum style --foreground="#7C3AED" "📦 Total segments: $total_segments"
+    gum style --foreground="#7C3AED" "📦 Estimated segments: $total_segments"
     echo
     
     local base_name
@@ -137,29 +137,113 @@ split_audiobook() {
     mkdir -p "$output_dir"
     
     gum style --foreground="#F59E0B" "📁 Output directory: $output_dir"
+    gum style --foreground="#06B6D4" "🔄 Splitting audiobook using ffmpeg segment muxer..."
     echo
     
-    local current_time=0
-    local segment_num=1
+    # Use ffmpeg's segment muxer for efficient splitting with progress
+    local segment_pattern="$output_dir/${base_name}_segment_%04d.mp3"
+    local progress_file="/tmp/ffmpeg_progress_$$"
     
-    while [ "$current_time" -lt "$total_duration" ]; do
-        local output_file
-        output_file="$output_dir/${base_name}_segment_$(printf "%04d" "$segment_num").mp3"
-        
-        gum style --foreground="#06B6D4" "🔄 Creating segment $segment_num/$total_segments: $(basename "$output_file")"
-        
-        if ! ffmpeg -y -i "$input_file" -ss "$current_time" -t "$segment_duration" -c:a libmp3lame -b:a 128k "$output_file" &>/dev/null; then
-            gum style --foreground="#DC2626" "❌ Failed to create segment $segment_num"
-            exit 1
-        fi
-        
-        current_time=$((current_time + segment_duration))
-        segment_num=$((segment_num + 1))
-    done
+    # Start ffmpeg in background with progress reporting
+    ffmpeg -y -i "$input_file" \
+        -f segment \
+        -segment_time "$segment_duration" \
+        -c:a libmp3lame \
+        -b:a 128k \
+        -reset_timestamps 1 \
+        -progress "$progress_file" \
+        "$segment_pattern" 2>/dev/null &
+    
+    local ffmpeg_pid=$!
+    
+    # Check if gum supports progress command
+    if gum progress --help &>/dev/null; then
+        # Use gum progress bar for newer versions
+        {
+            while kill -0 "$ffmpeg_pid" 2>/dev/null; do
+                if [[ -f "$progress_file" ]]; then
+                    local current_time_us
+                    current_time_us=$(grep "^out_time_us=" "$progress_file" | tail -1 | cut -d= -f2)
+                    
+                    if [[ -n "$current_time_us" && "$current_time_us" != "N/A" && "$current_time_us" -gt 0 ]]; then
+                        local current_seconds=$((current_time_us / 1000000))
+                        local progress_percent=$((current_seconds * 100 / total_duration))
+                        
+                        if [[ "$progress_percent" -le 100 ]]; then
+                            echo "$progress_percent"
+                        fi
+                    fi
+                fi
+                sleep 0.5
+            done
+            echo "100"  # Ensure we reach 100% at the end
+        } | gum progress --title "🔄 Splitting audiobook..." --color="#06B6D4"
+    else
+        # Fallback to styled text progress for older gum versions
+        local last_percent=-1
+        local start_time
+        start_time=$(date +%s)
+        while kill -0 "$ffmpeg_pid" 2>/dev/null; do
+            if [[ -f "$progress_file" ]]; then
+                local current_time_us
+                current_time_us=$(grep "^out_time_us=" "$progress_file" | tail -1 | cut -d= -f2)
+                
+                if [[ -n "$current_time_us" && "$current_time_us" != "N/A" && "$current_time_us" -gt 0 ]]; then
+                    local current_seconds=$((current_time_us / 1000000))
+                    local progress_percent=$((current_seconds * 100 / total_duration))
+                    
+                    if [[ "$progress_percent" -le 100 && "$progress_percent" != "$last_percent" ]]; then
+                        local now
+                        now=$(date +%s)
+                        local elapsed=$((now - start_time))
+                        
+                        local eta_seconds=""
+                        if [[ "$progress_percent" -gt 0 ]]; then
+                            local total_estimated=$((elapsed * 100 / progress_percent))
+                            local remaining=$((total_estimated - elapsed))
+                            eta_seconds=" | ETA: $(format_time "$remaining")"
+                        fi
+                        
+                        printf "\r\033[K🔄 %s%% (%s / %s) | Elapsed: %s%s" \
+                            "$progress_percent" \
+                            "$(format_time "$current_seconds")" \
+                            "$(format_time "$total_duration")" \
+                            "$(format_time "$elapsed")" \
+                            "$eta_seconds"
+                        last_percent="$progress_percent"
+                    fi
+                fi
+            fi
+            sleep 0.5
+        done
+        local final_time
+        final_time=$(date +%s)
+        local total_elapsed=$((final_time - start_time))
+        printf "\r\033[K✅ Complete: 100%% (%s / %s) | Total time: %s\n" \
+            "$(format_time "$total_duration")" \
+            "$(format_time "$total_duration")" \
+            "$(format_time "$total_elapsed")"
+    fi
+    
+    # Wait for ffmpeg to complete and check exit status
+    if ! wait "$ffmpeg_pid"; then
+        rm -f "$progress_file"
+        echo
+        gum style --foreground="#DC2626" "❌ Failed to split audiobook"
+        exit 1
+    fi
+    
+    # Clean up progress file
+    rm -f "$progress_file"
+    
+    # Count actual segments created
+    local actual_segments
+    actual_segments=$(find "$output_dir" -name "${base_name}_segment_*.mp3" | wc -l)
     
     echo
-    gum style --foreground="#10B981" --bold "✅ Successfully split audiobook into $total_segments segments"
+    gum style --foreground="#10B981" --bold "✅ Successfully split audiobook into $actual_segments segments"
     gum style --foreground="#6B7280" "Output location: $output_dir"
+    gum style --foreground="#6B7280" "Used ffmpeg's built-in segment muxer for efficient processing"
 }
 
 sanitize_filename() {
