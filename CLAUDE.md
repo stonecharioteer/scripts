@@ -27,6 +27,9 @@ Personal utility scripts for automation and file processing tasks. Scripts range
 - **File naming simplicity**: Avoid unnecessary words like "_segment" in filenames to keep paths shorter
 - **Dynamic numbering**: Use minimum digits needed based on total count (2 for <100, 3 for <1000, 4 for >=1000)
 - **Human-friendly numbering**: Start file numbering from 1 instead of 0
+- **Output analysis**: Provide comprehensive summary with file statistics and anomaly detection after processing
+- **Performance optimization**: Intelligent thread count based on CPU architecture and system specs for optimal performance
+- **README updates**: Always update README when making changes to scripts for comprehensive documentation
 - **Progress feedback**: Prioritize user experience with real-time progress indicators
 - **Memory efficiency**: Prefer single-pass processing over parallel when memory is a concern
 - **Compatibility**: Consider older tool versions and provide fallbacks
@@ -98,3 +101,6 @@ Created a comprehensive audiobook splitting script with the following features:
 - Progress tracking significantly improves UX for long-running operations
 - Filename sanitization is crucial for cross-platform compatibility
 - Fallback implementations ensure compatibility across different tool versions
+
+## Development Reminders
+- Update the README whenever you change the scripts

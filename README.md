@@ -11,11 +11,14 @@ Split audiobooks into smaller segments for easier listening or processing using 
 
 **Features:**
 - **Efficient processing** - Uses ffmpeg's built-in segment muxer (low memory usage)
-- **Real-time progress** - Shows percentage, elapsed time, and ETA
-- **FAT32-compatible filenames** - Lowercase, no special characters
-- **4-digit numbering** - Zero-padded segments (0001-9999) for proper sorting
-- **Custom output directory** - Specify where files are saved
+- **Real-time progress** - Shows percentage, elapsed time, and ETA with fallback for older gum versions
+- **Intelligent performance** - Auto-detects CPU architecture and optimizes thread count accordingly
+- **FAT32-compatible filenames** - Lowercase, no special characters, shorter paths
+- **Dynamic numbering** - Uses minimum digits needed (2-4 digits based on segment count)
+- **Human-friendly indexing** - Starts from 1 instead of 0
+- **Custom output directory** - Specify where files are saved, uses directory name as file prefix
 - **Multiple formats** - Supports m4a, m4b, and mp3 input
+- **Comprehensive analysis** - Post-processing summary with file statistics and anomaly detection
 
 **Usage:**
 ```bash
@@ -33,14 +36,17 @@ Split audiobooks into smaller segments for easier listening or processing using 
 **Examples:**
 ```bash
 ./audiobook-split.sh audiobook.m4a                    # Split into 5-minute segments
-./audiobook-split.sh audiobook.m4b 600                # Split into 10-minute segments
-./audiobook-split.sh audiobook.mp3 480 -O /media/usb  # Custom output directory
+./audiobook-split.sh audiobook.m4b 600                # Split into 10-minute segments  
+./audiobook-split.sh audiobook.mp3 480 -O harry_potter # Custom output directory
 ```
 
 **Output:**
-- Files saved as `{sanitized_filename}_segment_0001.mp3`, `0002.mp3`, etc.
+- Files saved as `{prefix}_01.mp3`, `{prefix}_02.mp3`, etc. (dynamic digit count)
 - FAT32-compatible filenames (lowercase, underscores replace special chars)
+- Custom directory: Uses directory name as prefix (e.g., `harry_potter_01.mp3`)
 - Progress display: `🔄 45% (02:15 / 17:18:34) | Elapsed: 01:30 | ETA: 02:15`
+- Performance info: `⚡ Performance: Using 16/32 threads (AMD Ryzen 9 7950X) | RAM: 64G`
+- Post-processing analysis with file statistics and outlier detection
 
 ## `gi-select.sh`
 

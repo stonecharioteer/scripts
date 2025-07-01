@@ -96,6 +96,113 @@ format_time() {
     fi
 }
 
+format_size() {
+    local bytes="$1"
+    if [ "$bytes" -lt 1024 ]; then
+        echo "${bytes}B"
+    elif [ "$bytes" -lt 1048576 ]; then
+        echo "$((bytes / 1024))KB"
+    else
+        echo "$((bytes / 1048576))MB"
+    fi
+}
+
+analyze_output_files() {
+    local output_dir="$1"
+    local file_prefix="$2"
+    local expected_duration="$3"
+    
+    gum style --foreground="#8B5CF6" --bold "📊 Analyzing output files..."
+    echo
+    
+    local files=()
+    while IFS= read -r -d '' file; do
+        files+=("$file")
+    done < <(find "$output_dir" -name "${file_prefix}_*.mp3" -print0 | sort -z)
+    
+    if [ ${#files[@]} -eq 0 ]; then
+        gum style --foreground="#DC2626" "❌ No output files found!"
+        return 1
+    fi
+    
+    # Collect file data
+    local total_size=0
+    local normal_duration_count=0
+    local outliers=()
+    local tolerance=$((expected_duration / 10))  # 10% tolerance
+    
+    # Create temporary file for table data
+    local table_data="/tmp/audiobook_summary_$$"
+    echo "Category,Count,Duration Range,Size Range" > "$table_data"
+    
+    local min_duration=999999
+    local max_duration=0
+    local min_size=999999999
+    local max_size=0
+    
+    for file in "${files[@]}"; do
+        local duration
+        duration=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$file" 2>/dev/null | cut -d. -f1)
+        local size
+        size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "0")
+        
+        total_size=$((total_size + size))
+        
+        # Track min/max
+        if [ "$duration" -lt "$min_duration" ]; then min_duration="$duration"; fi
+        if [ "$duration" -gt "$max_duration" ]; then max_duration="$duration"; fi
+        if [ "$size" -lt "$min_size" ]; then min_size="$size"; fi
+        if [ "$size" -gt "$max_size" ]; then max_size="$size"; fi
+        
+        # Check if duration is within tolerance
+        local diff=$((duration - expected_duration))
+        if [ "$diff" -lt 0 ]; then diff=$((-diff)); fi
+        
+        if [ "$diff" -le "$tolerance" ]; then
+            normal_duration_count=$((normal_duration_count + 1))
+        else
+            outliers+=("$(basename "$file"):$(format_time "$duration"):$(format_size "$size")")
+        fi
+    done
+    
+    # Add data to table
+    {
+        echo "Normal Files,$normal_duration_count,~$(format_time "$expected_duration"),$(format_size "$min_size")-$(format_size "$max_size")"
+        echo "Outliers,${#outliers[@]},$(format_time "$min_duration")-$(format_time "$max_duration"),Varies"
+        echo "Total Files,${#files[@]},$(format_time "$min_duration")-$(format_time "$max_duration"),$(format_size "$total_size")"
+    } >> "$table_data"
+    
+    # Display summary with gum format instead of interactive table
+    gum style --foreground="#06B6D4" --bold "📋 File Summary:"
+    echo
+    gum style --foreground="#10B981" "  Normal Files: $normal_duration_count (within 10% of $(format_time "$expected_duration"))"
+    gum style --foreground="#F59E0B" "  Outliers: ${#outliers[@]} (duration deviation >10%)"
+    gum style --foreground="#8B5CF6" "  Total Files: ${#files[@]}"
+    gum style --foreground="#6B7280" "  Size Range: $(format_size "$min_size") - $(format_size "$max_size")"
+    gum style --foreground="#6B7280" "  Duration Range: $(format_time "$min_duration") - $(format_time "$max_duration")"
+    
+    # Show outliers if any
+    if [ ${#outliers[@]} -gt 0 ]; then
+        echo
+        gum style --foreground="#F59E0B" --bold "⚠️  Duration Outliers (>10% deviation):"
+        for outlier in "${outliers[@]}"; do
+            local filename
+            local duration
+            local size
+            filename=$(echo "$outlier" | cut -d: -f1)
+            duration=$(echo "$outlier" | cut -d: -f2)
+            size=$(echo "$outlier" | cut -d: -f3)
+            gum style --foreground="#F59E0B" "    $filename: $duration ($size)"
+        done
+    fi
+    
+    # Cleanup
+    rm -f "$table_data"
+    
+    echo
+    gum style --foreground="#10B981" "✨ Analysis complete! Total size: $(format_size "$total_size")"
+}
+
 get_duration() {
     local file="$1"
     
@@ -152,21 +259,90 @@ split_audiobook() {
     
     mkdir -p "$output_dir"
     
+    # Detect system info for optimal threading decisions
+    local cpu_count
+    local detected_cores
+    detected_cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "4")
+    
+    # Collect system information
+    local cpu_model=""
+    local cpu_arch=""
+    local total_memory=""
+    
+    if command -v lscpu &>/dev/null; then
+        cpu_model=$(lscpu | grep "Model name" | cut -d: -f2 | xargs)
+        cpu_arch=$(lscpu | grep "Architecture" | cut -d: -f2 | xargs)
+    elif [ -f /proc/cpuinfo ]; then
+        cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+        cpu_arch=$(uname -m)
+    fi
+    
+    if command -v free &>/dev/null; then
+        total_memory=$(free -h | grep "^Mem:" | awk '{print $2}')
+    elif command -v sysctl &>/dev/null; then
+        total_memory=$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1024/1024/1024)"G"}')
+    fi
+    
+    # Intelligent thread count based on system characteristics
+    if [[ "$cpu_model" == *"AMD"* ]] && [[ "$cpu_model" == *"Ryzen"* ]] && [ "$detected_cores" -gt 16 ]; then
+        # AMD Ryzen with many cores - use more threads (good for parallel workloads)
+        cpu_count=$((detected_cores / 2))
+    elif [[ "$cpu_model" == *"Intel"* ]] && [[ "$cpu_model" == *"Xeon"* ]] && [ "$detected_cores" -gt 12 ]; then
+        # Intel Xeon - server grade, can handle more threads
+        cpu_count=$((detected_cores / 2))
+    elif [[ "$cpu_arch" == *"aarch64"* ]] || [[ "$cpu_arch" == *"arm64"* ]]; then
+        # ARM processors (like Apple Silicon) - different threading characteristics
+        cpu_count=$((detected_cores < 12 ? detected_cores : 12))
+    elif [ "$detected_cores" -gt 8 ]; then
+        # Generic cap for unknown processors
+        cpu_count=8
+    else
+        cpu_count="$detected_cores"
+    fi
+    
+    # Memory consideration - if low memory, reduce threads
+    if [[ "$total_memory" =~ ^[0-9]+G$ ]]; then
+        local memory_gb=${total_memory%G}
+        if [ "$memory_gb" -lt 8 ] && [ "$cpu_count" -gt 4 ]; then
+            cpu_count=4
+        fi
+    fi
+    
     gum style --foreground="#F59E0B" "📁 Output directory: $output_dir"
     gum style --foreground="#06B6D4" "🔄 Splitting audiobook using ffmpeg segment muxer..."
+    
+    # Display system-aware performance info
+    local perf_msg="⚡ Performance: Using $cpu_count/$detected_cores threads"
+    if [[ -n "$cpu_model" ]]; then
+        perf_msg="$perf_msg ($cpu_model)"
+    fi
+    if [[ -n "$total_memory" ]]; then
+        perf_msg="$perf_msg | RAM: $total_memory"
+    fi
+    gum style --foreground="#8B5CF6" "$perf_msg"
     echo
     
     # Use ffmpeg's segment muxer for efficient splitting with progress
     local segment_pattern="$output_dir/${file_prefix}_%0${digit_count}d.mp3"
     local progress_file="/tmp/ffmpeg_progress_$$"
     
-    # Start ffmpeg in background with progress reporting
-    ffmpeg -y -i "$input_file" \
+    # Start ffmpeg in background with progress reporting and performance optimizations
+    ffmpeg -y \
+        -threads "$cpu_count" \
+        -fflags +fastseek+genpts \
+        -analyzeduration 1000000 \
+        -probesize 1000000 \
+        -thread_queue_size 512 \
+        -i "$input_file" \
         -f segment \
         -segment_time "$segment_duration" \
         -segment_start_number 1 \
         -c:a libmp3lame \
         -b:a 128k \
+        -q:a 2 \
+        -joint_stereo 1 \
+        -threads "$cpu_count" \
+        -avoid_negative_ts make_zero \
         -reset_timestamps 1 \
         -progress "$progress_file" \
         "$segment_pattern" 2>/dev/null &
@@ -261,6 +437,10 @@ split_audiobook() {
     gum style --foreground="#10B981" --bold "✅ Successfully split audiobook into $actual_segments segments"
     gum style --foreground="#6B7280" "Output location: $output_dir"
     gum style --foreground="#6B7280" "Used ffmpeg's built-in segment muxer for efficient processing"
+    
+    # Analyze output files for anomalies
+    echo
+    analyze_output_files "$output_dir" "$file_prefix" "$segment_duration"
 }
 
 sanitize_filename() {
