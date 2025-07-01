@@ -119,19 +119,35 @@ split_audiobook() {
     
     local total_segments=$(((total_duration + segment_duration - 1) / segment_duration))
     
+    # Calculate minimum digits needed for numbering
+    local digit_count
+    if [[ "$total_segments" -lt 10 ]]; then
+        digit_count=2
+    elif [[ "$total_segments" -lt 100 ]]; then
+        digit_count=2
+    elif [[ "$total_segments" -lt 1000 ]]; then
+        digit_count=3
+    else
+        digit_count=4
+    fi
+    
     gum style --foreground="#7C3AED" "📊 Total duration: $(format_time "$total_duration")"
     gum style --foreground="#7C3AED" "⏱️  Segment duration: $(format_time "$segment_duration")"
-    gum style --foreground="#7C3AED" "📦 Estimated segments: $total_segments"
+    gum style --foreground="#7C3AED" "📦 Estimated segments: $total_segments (${digit_count}-digit numbering)"
     echo
     
     local base_name
     base_name=$(sanitize_filename "$(basename "${input_file%.*}")")
     
     local output_dir
+    local file_prefix
     if [[ -n "$custom_output_dir" ]]; then
         output_dir="$custom_output_dir"
+        # Use the last part of the output directory path as prefix
+        file_prefix=$(sanitize_filename "$(basename "$custom_output_dir")")
     else
         output_dir="${base_name}_segments"
+        file_prefix="$base_name"
     fi
     
     mkdir -p "$output_dir"
@@ -141,13 +157,14 @@ split_audiobook() {
     echo
     
     # Use ffmpeg's segment muxer for efficient splitting with progress
-    local segment_pattern="$output_dir/${base_name}_segment_%04d.mp3"
+    local segment_pattern="$output_dir/${file_prefix}_%0${digit_count}d.mp3"
     local progress_file="/tmp/ffmpeg_progress_$$"
     
     # Start ffmpeg in background with progress reporting
     ffmpeg -y -i "$input_file" \
         -f segment \
         -segment_time "$segment_duration" \
+        -segment_start_number 1 \
         -c:a libmp3lame \
         -b:a 128k \
         -reset_timestamps 1 \
@@ -238,7 +255,7 @@ split_audiobook() {
     
     # Count actual segments created
     local actual_segments
-    actual_segments=$(find "$output_dir" -name "${base_name}_segment_*.mp3" | wc -l)
+    actual_segments=$(find "$output_dir" -name "${file_prefix}_*.mp3" | wc -l)
     
     echo
     gum style --foreground="#10B981" --bold "✅ Successfully split audiobook into $actual_segments segments"

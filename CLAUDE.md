@@ -23,6 +23,10 @@ Personal utility scripts for automation and file processing tasks. Scripts range
 *This section is updated continuously as coding preferences and patterns are observed*
 
 - **Filename conventions**: Use descriptive names with hyphens (e.g., `audiobook-split.sh`)
+- **Output file naming**: When custom output directory is specified, use directory name as file prefix
+- **File naming simplicity**: Avoid unnecessary words like "_segment" in filenames to keep paths shorter
+- **Dynamic numbering**: Use minimum digits needed based on total count (2 for <100, 3 for <1000, 4 for >=1000)
+- **Human-friendly numbering**: Start file numbering from 1 instead of 0
 - **Progress feedback**: Prioritize user experience with real-time progress indicators
 - **Memory efficiency**: Prefer single-pass processing over parallel when memory is a concern
 - **Compatibility**: Consider older tool versions and provide fallbacks
