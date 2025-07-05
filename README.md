@@ -1,6 +1,11 @@
 # scripts
 Scripts to help automate small tasks
 
+## Table of Contents
+- [audiobook-split.sh](#audiobook-splitsh)
+- [audible-download.sh](#audible-downloadsh)
+- [gi-select.sh](#gi-selectsh)
+
 ## `audiobook-split.sh`
 
 Split audiobooks into smaller segments for easier listening or processing using ffmpeg's efficient segment muxer.
@@ -47,6 +52,56 @@ Split audiobooks into smaller segments for easier listening or processing using 
 - Progress display: `🔄 45% (02:15 / 17:18:34) | Elapsed: 01:30 | ETA: 02:15`
 - Performance info: `⚡ Performance: Using 16/32 threads (AMD Ryzen 9 7950X) | RAM: 64G`
 - Post-processing analysis with file statistics and outlier detection
+
+## `audible-download.sh`
+
+Download audiobooks from Audible using audible-cli with comprehensive configuration options.
+
+**Requirements:**
+- `uvx` for running audible-cli
+- `audible-cli` (installed via uvx)
+- `gum` for prettier terminal output (optional)
+
+**Features:**
+- **Multiple download formats** - AAXC, AAX, and PDF support
+- **Flexible filtering** - Download by date range or all audiobooks
+- **Profile support** - Use different Audible accounts/profiles
+- **Dry-run mode** - Preview what would be downloaded without downloading
+- **Custom output directory** - Specify download location (default: ~/Audiobooks/audible)
+- **Progress tracking** - Real-time download progress with verbose levels
+- **Input validation** - Validates dates, formats, and dependencies
+- **Enhanced UI** - Styled output with gum integration
+
+**Setup:**
+Before using this script, authenticate with Audible:
+```bash
+uvx --from audible-cli audible quickstart
+```
+
+**Usage:**
+```bash
+./audible-download.sh [OPTIONS]
+./audible-download.sh -h  # Show help
+```
+
+**Options:**
+- `-d, --download-dir DIR` - Download directory (default: ~/Audiobooks/audible)
+- `-p, --profile PROFILE` - Audible profile to use
+- `-f, --format FORMAT` - Download format: aaxc, aax, pdf (default: aaxc)
+- `-a, --all` - Download all audiobooks from library
+- `-s, --start-date DATE` - Download books added after this date (YYYY-MM-DD)
+- `-e, --end-date DATE` - Download books added before this date (YYYY-MM-DD)
+- `-v, --verbose LEVEL` - Verbose level: debug, info, warning, error (default: info)
+- `-n, --dry-run` - Show what would be downloaded without downloading
+
+**Examples:**
+```bash
+./audible-download.sh --all                              # Download all audiobooks
+./audible-download.sh --all --format aax                 # Download all as AAX format
+./audible-download.sh --start-date "2023-01-01" --all    # Download books added after Jan 1, 2023
+./audible-download.sh --profile work --all               # Use specific profile
+./audible-download.sh --dry-run --all                    # Preview what would be downloaded
+```
 
 ## `gi-select.sh`
 
