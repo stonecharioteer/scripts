@@ -78,13 +78,15 @@ Comprehensive Kindle highlights management system with DuckDB integration for st
 
 **Features:**
 - **Database storage** - Robust DuckDB backend with proper schema and indexing
-- **Import system** - Processes myClippings.txt with duplicate detection and content normalization
+- **Multiple file import** - Process multiple myClippings files in a single command with wildcard support
+- **Enhanced duplicate detection** - SHA256 content hashing with clean import summaries (no error spam)
+- **Database statistics** - Comprehensive summary showing books, authors, highlight counts, and date ranges
 - **Beautiful display** - Elegant terminal interface with text wrapping and proper spacing
 - **Flexible sorting** - Sort by location or date_added with ascending/descending order
 - **Smart UI behavior** - Only prompts for full highlights view when using default count
 - **Book/author separation** - Parses "Title (Author)" format into separate database fields
 - **Content processing** - Removes trailing spaces, em-dashes, normalizes whitespace
-- **Duplicate prevention** - SHA256 content hashing prevents duplicate imports
+- **Overall import tracking** - Shows cumulative statistics across multiple files
 - **Configurable options** - Custom database path, variable highlight count display
 - **Text wrapping** - Adaptive width detection (screen width vs 80 chars, whichever smaller)
 
@@ -95,15 +97,17 @@ Comprehensive Kindle highlights management system with DuckDB integration for st
 ```
 
 **Subcommands:**
-- `import` - Import highlights from myClippings file to database
+- `import` - Import highlights from myClippings file(s) to database
 - `show` - Display highlights from database with beautiful formatting
+- `summary` - Show database statistics and overview
 
 **Global Options:**
 - `--database-path PATH` - Database file path (default: ~/Documents/highlights.db)
 - `-h, --help` - Show help message
 
 **Import Options:**
-- `INPUT_FILE` - myClippings file to import (default: myClippings.txt)
+- `INPUT_FILE...` - One or more myClippings files to import (default: myClippings.txt)
+- Supports wildcards: `*.clippings.txt`, `book*.txt`, etc.
 
 **Show Options:**
 - `-n, --number COUNT` - Number of highlights to show (default: 10)
@@ -112,15 +116,62 @@ Comprehensive Kindle highlights management system with DuckDB integration for st
 
 **Examples:**
 ```bash
-./highlight-manager.sh import myClippings.txt                    # Import highlights
+# Import commands
+./highlight-manager.sh import myClippings.txt                    # Import single file
+./highlight-manager.sh import file1.txt file2.txt file3.txt     # Import multiple files
+./highlight-manager.sh import *.clippings.txt                   # Import with wildcards
+./highlight-manager.sh --database-path ~/custom.db import book*.txt # Custom database + multiple files
+
+# Show commands
 ./highlight-manager.sh show -n 5                               # Show 5 highlights (no prompt for full view)
 ./highlight-manager.sh show --sort-by date_added               # Sort by date added (ascending)
 ./highlight-manager.sh show --sort-by location --sort-order desc # Sort by location (descending)
-./highlight-manager.sh --database-path ~/custom.db import      # Custom database location
 ./highlight-manager.sh show --number 20 --sort-by date_added   # Show 20 highlights sorted by date
+
+# Summary command
+./highlight-manager.sh summary                                  # Show database overview
+./highlight-manager.sh summary --database-path ~/custom.db     # Summary for custom database
 ```
 
-**Display Format:**
+**Import Output Format:**
+```
+✅ Import completed:
+   - 127 quotes found in file
+   - 126 new highlights imported
+   - 1 duplicates skipped (already in database)
+   - 130 total highlights in database
+
+# Multiple file import adds overall summary:
+📊 Overall Import Summary:
+   - 131 total quotes found across all files
+   - 126 new highlights imported
+   - 5 duplicates skipped
+   - 149 total highlights in database
+```
+
+**Summary Output Format:**
+```
+📊 Overall Statistics:
+   Total highlights: 154
+   Unique books: 3
+   Unique authors: 3
+
+📚 Highlights per Book:
+   Empire of AI                           by Karen Hao            76 highlights
+   In Spite of the Gods                   by Edward Luce          59 highlights
+   MAHABHARATA: THE EPIC AND THE NATION   by Devy, G. N.          19 highlights
+
+📅 Date Range:
+   Earliest highlight: Friday, June 27, 2025 01:02:34 PM
+   Latest highlight: Tuesday, June 24, 2025 08:31:37 PM
+
+✍️  Top Authors by Highlight Count:
+   Karen Hao                      76 highlights
+   Edward Luce                    59 highlights
+   Devy, G. N.                    19 highlights
+```
+
+**Show Display Format:**
 ```
 1. Empire of AI by Karen Hao
 
