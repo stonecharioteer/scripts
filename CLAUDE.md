@@ -37,6 +37,12 @@ Personal utility scripts for automation and file processing tasks. Scripts range
 - **Git workflow**: Feature branches with descriptive commit messages, squash merges preferred
 - **Smart UI patterns**: Only show optional prompts when using default values, not when user specifies explicit values
 
+## Development Workflow Guidelines
+- **Remember to not commit to main.**
+
+## System Safety Guidelines
+- NEVER try to use pkill to kill a generic process like `python3`!!!
+
 ## Development Log
 
 ### Conversation Management Strategy

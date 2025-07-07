@@ -1,5 +1,6 @@
 # Kindle highlights file - contains personal data
 myClippings.txt
+*.clippings.txt
 
 # Temporary/working files
 *.tmp
