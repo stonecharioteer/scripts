@@ -1,0 +1,8 @@
+# Kindle highlights file - contains personal data
+myClippings.txt
+
+# Temporary/working files
+*.tmp
+*.temp
+clippings.json
+highlight-manager-broken.sh

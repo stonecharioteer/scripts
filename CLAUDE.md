@@ -35,8 +35,12 @@ Personal utility scripts for automation and file processing tasks. Scripts range
 - **Compatibility**: Consider older tool versions and provide fallbacks
 - **Documentation**: Comprehensive README updates with features, examples, and technical details
 - **Git workflow**: Feature branches with descriptive commit messages, squash merges preferred
+- **Smart UI patterns**: Only show optional prompts when using default values, not when user specifies explicit values
 
 ## Development Log
+
+### Conversation Management Strategy
+- Store our conversation in `conversation.md` so that we record everything we talk about locally and don't forget when disconnected or if the process is killed
 
 ### audiobook-split.sh Implementation (Session: 2025-07-01)
 
@@ -69,38 +73,68 @@ Created a comprehensive audiobook splitting script with the following features:
 - **Shellcheck validated**: Follows bash best practices
 - **Progress display**: "🔄 45% (02:15 / 17:18:34) | Elapsed: 01:30 | ETA: 02:15"
 
-#### Git Workflow
-- Created feature branch: feat/audiobook-splitter
-- Initial commit: Basic script with parallel processing
-- Enhancement commit: Switched to ffmpeg segment muxer with progress tracking
-- Updated README.md with comprehensive documentation
-- Created PR with detailed technical description
-
-#### Files Modified
-- `audiobook-split.sh`: Main script implementation (executable)
-- `README.md`: Added comprehensive documentation with features, usage, examples
-- `CLAUDE.md`: This development log
-
-#### Usage Examples
-```bash
-# Basic usage
-./audiobook-split.sh audiobook.m4a
-
-# Custom segment duration (10 minutes)
-./audiobook-split.sh audiobook.m4b 600
-
-# Custom output directory
-./audiobook-split.sh audiobook.mp3 480 -O /media/usb/audiobooks
-
-# Show help
-./audiobook-split.sh -h
-```
-
 #### Lessons Learned
 - ffmpeg's segment muxer is more efficient than manual parallel processing
 - Progress tracking significantly improves UX for long-running operations
 - Filename sanitization is crucial for cross-platform compatibility
 - Fallback implementations ensure compatibility across different tool versions
 
-## Development Reminders
-- Update the README whenever you change the scripts
+### highlight-manager.sh Implementation (Session: 2025-07-07)
+
+Created a comprehensive Kindle highlights management system with DuckDB integration:
+
+#### Initial Implementation
+- **Purpose**: Convert Kindle myClippings format to structured database and provide elegant viewing interface
+- **Database**: DuckDB for robust storage with proper schema and indexing
+- **Text processing**: Book/author parsing, content cleaning, duplicate detection via SHA256 hashing
+- **UI**: Beautiful terminal interface using gum for styling and formatting
+
+#### Architecture Evolution
+1. **Initial approach**: Direct myClippings parsing with complex bash loops
+2. **Problem identified**: Parsing hang issues and complex quote escaping in SQL
+3. **Intermediate solution**: Two-stage process using JSON conversion + Python/SQLite bridge
+4. **Final approach**: Integrated workflow with DuckDB COPY command and tab-separated output for clean data extraction
+
+#### Key Features Implemented
+- **Integrated architecture**: Single script handling both import and display functionality
+- **Import command**: Processes myClippings.txt with duplicate detection and content normalization
+- **Show command**: Beautiful display with text wrapping, proper spacing, and metadata formatting
+- **Content processing**: Removes trailing spaces, em-dashes, normalizes whitespace
+- **Book/author separation**: Parses "Title (Author)" format into separate database fields
+- **Configurable options**: Custom database path, variable highlight count display
+
+#### Sorting Enhancement (Session: 2025-07-07)
+
+Added flexible sorting functionality to improve highlight organization and user experience:
+
+##### Features Added
+- **--sort-by flag**: Support for `location` or `date_added` sorting fields
+- **--sort-order flag**: Support for `asc` or `desc` ordering
+- **Default behavior**: `location ASC, date_added ASC, book_title ASC` for logical reading order
+- **Alternative sorting**: `--sort-by date_added` changes to `date_added ASC, location ASC, book_title ASC`
+- **Smart UI behavior**: Only prompts for full highlights view when using default count (not when user specifies -n/--number)
+
+##### Technical Implementation
+- **Dynamic ORDER BY clause**: Built at runtime based on user parameters
+- **Input validation**: Validates sort field and order parameters with helpful error messages
+- **Consistent sorting**: Applied to both main display and full highlights viewer
+- **Parameter passing**: Extended function signatures to pass sort parameters through the call chain
+
+##### Usage Examples
+```bash
+./highlight-manager.sh show                                    # Default: location ascending
+./highlight-manager.sh show --sort-by date_added              # Date added ascending  
+./highlight-manager.sh show --sort-by location --sort-order desc  # Location descending
+./highlight-manager.sh show -n 5 --sort-by date_added         # 5 highlights, date sorted, no prompt
+```
+
+##### UX Improvements
+- **Contextual prompts**: Only show "view full highlights" prompt when using default count
+- **Clear documentation**: Updated help text with sorting explanations and examples
+- **Intuitive defaults**: Location-based sorting for logical reading progression
+
+##### Lessons Learned
+- **Smart UI patterns**: Users who specify explicit values (like count) don't want additional prompts
+- **Flexible sorting**: Multiple sort criteria provide better organization for different use cases
+- **Parameter validation**: Early validation with clear error messages improves user experience
+- **Consistent behavior**: Sorting should work the same across all display modes
