@@ -102,5 +102,132 @@ Created a comprehensive audiobook splitting script with the following features:
 - Filename sanitization is crucial for cross-platform compatibility
 - Fallback implementations ensure compatibility across different tool versions
 
+### Audiobook Processing Pipeline Implementation (Session: 2025-07-05)
+
+Created comprehensive audiobook processing pipeline combining audible-cli, format conversion, and existing audiobook-split functionality.
+
+#### New Scripts Created
+
+##### audible-download.sh
+- **Purpose**: Download audiobooks from Audible using audible-cli with configuration options
+- **Key features**: Multiple formats (AAXC, AAX, PDF), date filtering, profile support, dry-run mode
+- **Dependencies**: uvx, audible-cli, gum (optional)
+- **Setup requirement**: `uvx --from audible-cli audible quickstart` for authentication
+
+##### audiobook-pipeline.sh (Main Implementation)
+- **Purpose**: Complete pipeline from Audible download to OpenSwim-ready MP3 files
+- **Architecture**: Download → Convert → Split workflow with interactive selection
+- **Target use case**: Prepare audiobooks for OpenSwim MP3 player
+
+#### Pipeline Workflow
+1. **Activation bytes retrieval**: Uses `audible activation-bytes` command
+2. **Library listing**: Fetches complete Audible library via `audible library export`
+3. **Interactive selection**: Gum-based multi-select interface for targeted processing
+4. **Download**: Downloads selected audiobooks in AAX/AAXC format
+5. **Format conversion**: AAX/AAXC → M4B using ffmpeg with activation bytes
+6. **MP3 splitting**: M4B → individual MP3 files using existing audiobook-split.sh
+7. **Organization**: Creates book-specific folders in ~/Audiobooks/OpenSwim/
+
+#### Technical Implementation Details
+
+**Activation Bytes & Conversion**:
+- Uses ffmpeg 4.4+ for AAXC support (version validation included)
+- AAX conversion: `ffmpeg -activation_bytes BYTES -i input.aax -c copy output.m4b`
+- AAXC conversion: `ffmpeg -i input.aaxc -c copy output.m4b` (no activation bytes needed)
+- Preserves chapters and metadata during conversion
+
+**Command Format Discovery**:
+- Initial issue: Used `--output-format json` (incorrect)
+- Solution: Discovered correct format is `--format json`
+- Fallback strategy: Tries multiple command variations for compatibility
+
+**Interactive Selection**:
+- Uses gum's multi-select (`gum choose --no-limit`)
+- Proper cancellation handling (Ctrl+C detection)
+- Clean output parsing with debug message filtering
+
+#### Key Challenges Solved
+
+**Library Output Parsing**:
+- Problem: Debug messages mixed with actual library data
+- Solution: Separate stderr for debug output (`>&2`), clean data filtering
+- Regex filtering: Remove gum-styled output, error messages, empty lines
+
+**User Experience Issues**:
+- Problem: Script continued after Ctrl+C cancellation
+- Solution: Proper exit code handling with `set +e`/`set -e` toggle
+- Clear user instructions for selection interface
+
+**Format Compatibility**:
+- Problem: audible-cli command variations across versions
+- Solution: Multiple format attempts with graceful fallbacks
+- Support for both JSON and non-JSON output formats
+
+#### Directory Structure
+```
+~/Audiobooks/audible/          (temporary downloads)
+~/Audiobooks/OpenSwim/         (final MP3 files)
+└── BookTitle/                 (sanitized folder names)
+    ├── booktitle_01.mp3       (5-minute segments by default)
+    ├── booktitle_02.mp3
+    └── ...
+```
+
+#### Dependencies & Requirements
+- **uvx**: For running audible-cli
+- **audible-cli**: Audible library access and downloading
+- **ffmpeg 4.4+**: AAX/AAXC format support and conversion
+- **gum**: Interactive selection interface
+- **jq**: JSON parsing for library data
+- **audiobook-split.sh**: Existing script for MP3 segmentation
+
+#### Files Modified/Created
+- `audiobook-pipeline.sh`: Main pipeline script (executable)
+- `audible-download.sh`: Standalone Audible downloader (executable)
+- `README.md`: Updated with new scripts, alphabetical ordering, table of contents
+- `CLAUDE.md`: This development log update
+
+#### Usage Examples
+```bash
+# Full interactive pipeline
+./audiobook-pipeline.sh
+
+# Use specific profile
+./audiobook-pipeline.sh --profile work
+
+# Custom segment duration (8 minutes)
+./audiobook-pipeline.sh --duration 480
+
+# Keep intermediate files for debugging
+./audiobook-pipeline.sh --keep-intermediate
+
+# Test library listing functionality
+./audiobook-pipeline.sh --test-library
+
+# Preview without processing
+./audiobook-pipeline.sh --dry-run
+```
+
+#### Current Status
+- ✅ Core pipeline functionality implemented
+- ✅ Interactive selection with proper cancellation
+- ✅ Library listing with clean output parsing
+- ✅ AAX/AAXC conversion working
+- ✅ Integration with existing audiobook-split.sh
+- ✅ Comprehensive error handling and user feedback
+- ✅ Documentation updated
+
+#### Known Limitations
+- Requires manual authentication setup with audible-cli
+- Dependent on specific audible-cli command format (may need updates for future versions)
+- JSON parsing assumes specific library export format
+
+#### Lessons Learned
+- **API exploration**: Command-line tools often have undocumented variations - test multiple formats
+- **Output separation**: Clean separation of debug/log output from actual data is crucial
+- **User cancellation**: Always handle Ctrl+C gracefully in interactive scripts
+- **Version compatibility**: Check tool versions and provide fallbacks
+- **Pipeline design**: Modular approach allows reuse of existing components (audiobook-split.sh)
+
 ## Development Reminders
 - Update the README whenever you change the scripts

@@ -2,9 +2,81 @@
 Scripts to help automate small tasks
 
 ## Table of Contents
+- [audiobook-pipeline.sh](#audiobook-pipelinesh)
 - [audiobook-split.sh](#audiobook-splitsh)
 - [audible-download.sh](#audible-downloadsh)
 - [gi-select.sh](#gi-selectsh)
+
+## `audiobook-pipeline.sh`
+
+Complete audiobook processing pipeline: Download → Convert → Split to MP3s for OpenSwim with interactive selection.
+
+**Requirements:**
+- `uvx` for running audible-cli
+- `audible-cli` (automatically installed via uvx)
+- `ffmpeg` (version 4.4+ for AAXC support)
+- `gum` for interactive selection
+- `audiobook-split.sh` (should be in same directory)
+
+**Features:**
+- **Complete pipeline** - Download, convert, and split in one command
+- **Interactive selection** - Use gum to choose specific audiobooks from your library
+- **Format conversion** - AAX/AAXC to M4B to MP3 with activation bytes
+- **Organized output** - Creates individual folders for each book in OpenSwim directory
+- **Progress tracking** - Real-time progress for each pipeline step
+- **Dry-run mode** - Preview what would be processed without doing it
+- **Intermediate file management** - Option to keep or clean up temporary files
+- **Error handling** - Robust error handling with detailed logging
+- **Profile support** - Use different Audible accounts/profiles
+
+**Pipeline Steps:**
+1. **Retrieve activation bytes** - Automatically get activation bytes from audible-cli
+2. **Library listing** - Fetch your complete Audible library
+3. **Interactive selection** - Choose one or more audiobooks with gum
+4. **Download** - Download selected audiobooks in AAX/AAXC format
+5. **Convert** - Convert to M4B format using ffmpeg and activation bytes
+6. **Split** - Split into individual MP3 files using audiobook-split.sh
+7. **Organize** - Place files in ~/Audiobooks/OpenSwim/BookTitle/ structure
+
+**Setup:**
+Before using this script, authenticate with Audible:
+```bash
+uvx --from audible-cli audible quickstart
+```
+
+**Usage:**
+```bash
+./audiobook-pipeline.sh [OPTIONS]
+./audiobook-pipeline.sh -h  # Show help
+```
+
+**Options:**
+- `-p, --profile PROFILE` - Audible profile to use
+- `-a, --activation-bytes BYTES` - Activation bytes (auto-retrieved if not provided)
+- `-d, --duration SECONDS` - Segment duration in seconds (default: 300 = 5 minutes)
+- `-o, --output-dir DIR` - Output directory (default: ~/Audiobooks/OpenSwim)
+- `-t, --temp-dir DIR` - Temporary download directory (default: ~/Audiobooks/audible)
+- `-k, --keep-intermediate` - Keep intermediate files (M4B, AAX)
+- `-n, --dry-run` - Show what would be processed without doing it
+
+**Examples:**
+```bash
+./audiobook-pipeline.sh                        # Full interactive pipeline
+./audiobook-pipeline.sh --profile work         # Use specific profile
+./audiobook-pipeline.sh --duration 480         # 8-minute segments
+./audiobook-pipeline.sh --keep-intermediate    # Keep downloaded files
+./audiobook-pipeline.sh --dry-run             # Preview what would happen
+```
+
+**Directory Structure:**
+```
+~/Audiobooks/audible/          (temporary downloads)
+~/Audiobooks/OpenSwim/         (final MP3 files)
+└── BookTitle/                 (one folder per book)
+    ├── booktitle_01.mp3
+    ├── booktitle_02.mp3
+    └── ...
+```
 
 ## `audiobook-split.sh`
 
