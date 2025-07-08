@@ -450,14 +450,18 @@ convert_to_m4b() {
             "$output_file"
     else
         # AAXC files don't need activation bytes
+        # Use error-tolerant settings to handle corrupted streams
         ffmpeg -y \
             -threads "$cpu_count" \
-            -fflags +fastseek+genpts \
+            -fflags +fastseek+genpts+igndts \
             -analyzeduration 1000000 \
             -probesize 1000000 \
             -thread_queue_size 512 \
+            -err_detect ignore_err \
             -i "$input_file" \
-            -c copy \
+            -c:v copy \
+            -c:a copy \
+            -ignore_unknown \
             -threads "$cpu_count" \
             "$output_file"
     fi
