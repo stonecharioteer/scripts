@@ -212,6 +212,142 @@ Created comprehensive audiobook processing pipeline combining audible-cli, forma
 - **Version compatibility**: Check tool versions and provide fallbacks
 - **Pipeline design**: Modular approach allows reuse of existing components (audiobook-split.sh)
 
+### Modular Redesign Implementation (Session: 2025-07-08)
+
+Redesigned audiobook-pipeline.sh from monolithic script to modular subcommand architecture with enhanced performance optimization.
+
+#### Architecture Transformation
+1. **Original design**: Single pipeline script with fixed workflow (download → convert → split)
+2. **Problem identified**: Inflexible workflow - couldn't convert existing files without downloading
+3. **Final solution**: Modular subcommand design with three distinct modes
+
+#### New Subcommand Architecture
+
+##### Core Subcommands Implemented
+- **`download` subcommand**: Download audiobooks from Audible library (no conversion)
+- **`convert` subcommand**: Convert existing AAX/AAXC files to split MP3s (no download needed)
+- **`automate` subcommand**: Full pipeline combining download and convert (original behavior)
+
+##### Key Technical Enhancements
+
+**CPU Performance Optimization**:
+- Imported intelligent thread detection from audiobook-split.sh
+- Architecture-specific tuning (AMD Ryzen, Intel Xeon, ARM processors)
+- Memory-aware thread adjustment (<8GB RAM reduces thread count)
+- Performance logging with system information display
+- Optimized ffmpeg flags with dual threading (`-threads` for input and output)
+
+**Enhanced Argument Parsing**:
+- Global options vs subcommand-specific options separation
+- Flexible argument handling with proper validation
+- Help text organized by subcommand with comprehensive examples
+
+**File Processing Improvements**:
+- Multiple file support: `convert *.aaxc` processes all files in one command
+- Automatic title extraction from file metadata using ffprobe
+- Custom title override option for manual control
+- Proper file format validation (AAX/AAXC only)
+
+#### Implementation Details
+
+**Performance Integration (Lines 172-246)**:
+```bash
+# System detection with CPU architecture awareness
+calculate_optimal_threads() {
+    # AMD Ryzen: cores/2 for >16 core systems
+    # Intel Xeon: cores/2 for >12 core systems  
+    # ARM: cap at 12 threads max
+    # Memory constraint: reduce threads if <8GB RAM
+}
+
+# Performance logging during conversion
+log_performance_info() {
+    # Shows: "⚡ Performance: Using 16 threads | CPU: AMD Ryzen 9 7950X | RAM: 64G"
+}
+```
+
+**Enhanced FFmpeg Conversion (Lines 415-472)**:
+```bash
+# Optimized conversion with threading and performance flags
+ffmpeg -y \
+    -threads "$cpu_count" \
+    -fflags +fastseek+genpts \
+    -analyzeduration 1000000 \
+    -probesize 1000000 \
+    -thread_queue_size 512 \
+    -activation_bytes "$activation_bytes" \
+    -i "$input_file" \
+    -c copy \
+    -threads "$cpu_count" \
+    "$output_file"
+```
+
+**Metadata Extraction (Lines 480-495)**:
+```bash
+# Auto-extract book titles from file metadata
+extract_title_from_file() {
+    # Try ffprobe metadata first, fallback to filename
+    ffprobe -v quiet -show_entries format_tags=title -of csv=p=0 "$file"
+}
+```
+
+#### Usage Examples and Workflows
+
+**Download-only workflow**:
+```bash
+./audiobook-pipeline.sh download --all --format aax     # Download everything in AAX format
+./audiobook-pipeline.sh download                        # Interactive selection
+```
+
+**Convert existing files**:
+```bash
+./audiobook-pipeline.sh convert ~/Downloads/*.aaxc      # Convert multiple AAXC files
+./audiobook-pipeline.sh convert book.aax --title "Custom Title"  # Override metadata title
+./audiobook-pipeline.sh convert *.aax --duration 480 --keep-intermediate  # 8-min segments, keep M4B
+```
+
+**Automated pipeline** (maintains backward compatibility):
+```bash
+./audiobook-pipeline.sh automate --profile work         # Original full pipeline behavior
+```
+
+#### Technical Benefits Achieved
+
+**Separation of Concerns**:
+- Download functionality isolated from conversion logic
+- Each subcommand has focused responsibility and error handling
+- Shared functions (activation bytes, system detection) reused efficiently
+
+**Enhanced User Experience**:
+- Users can work with existing files without Audible authentication
+- Multiple file processing reduces repetitive command execution
+- Performance feedback provides transparency into system optimization
+
+**Improved Error Handling**:
+- File validation before processing starts
+- Per-file error reporting in batch operations
+- Graceful degradation when individual files fail
+
+#### Files Modified
+- `audiobook-pipeline.sh`: Complete rewrite with modular architecture
+- `README.md`: Updated with comprehensive subcommand documentation and examples
+- `CLAUDE.md`: This development log entry
+
+#### Current Status
+- ✅ Modular subcommand architecture implemented
+- ✅ CPU performance optimization integrated
+- ✅ Multiple file processing support
+- ✅ Backward compatibility maintained via `automate` subcommand
+- ✅ Enhanced documentation and help text
+- ✅ Comprehensive error handling and validation
+
+#### Lessons Learned
+- **Modular design**: Subcommands provide better user experience than monolithic scripts
+- **Performance reuse**: Successful patterns from one script (audiobook-split.sh) can be effectively applied to others
+- **Backward compatibility**: Maintaining existing workflows while adding new functionality reduces user friction
+- **Argument parsing complexity**: Global vs subcommand options require careful separation and validation
+- **Metadata extraction**: ffprobe provides reliable title extraction from audio files, improving automation
+
 ### highlight-manager.sh Implementation (Session: 2025-07-07)
 
 Created a comprehensive Kindle highlights management system with DuckDB integration:

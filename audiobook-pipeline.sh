@@ -11,39 +11,68 @@ ACTIVATION_BYTES=""
 SEGMENT_DURATION=300
 KEEP_INTERMEDIATE=false
 DRY_RUN=false
-TEST_LIBRARY=false
 
 show_help() {
     cat << EOF
-Usage: $SCRIPT_NAME [OPTIONS]
+Usage: $SCRIPT_NAME <subcommand> [OPTIONS]
 
-Complete audiobook pipeline: Download → Convert → Split to MP3s
-Interactive selection of audiobooks using gum for targeted processing.
+Modular audiobook processing pipeline with subcommands for different operations.
 
-PIPELINE STEPS:
-1. List available audiobooks from Audible library
-2. Interactive selection with gum
-3. Download selected audiobooks (AAX/AAXC)
-4. Convert to M4B format using activation bytes
-5. Split into individual MP3 files for OpenSwim
+SUBCOMMANDS:
+    download        Download audiobooks from Audible library
+    convert         Convert existing AAX/AAXC files to split MP3s
+    automate        Full pipeline: download and convert in one step
 
-OPTIONS:
+GLOBAL OPTIONS:
     -p, --profile PROFILE     Audible profile to use
-    -a, --activation-bytes    Activation bytes (will retrieve automatically if not provided)
     -d, --duration SECONDS    Segment duration in seconds (default: 300 = 5 minutes)
     -o, --output-dir DIR      Output directory (default: ~/Audiobooks/OpenSwim)
     -t, --temp-dir DIR        Temporary download directory (default: ~/Audiobooks/audible)
     -k, --keep-intermediate   Keep intermediate files (M4B, AAX)
     -n, --dry-run            Show what would be processed without doing it
-    --test-library           Test library listing only (for debugging)
     -h, --help               Show this help message
 
-EXAMPLES:
-    $SCRIPT_NAME                                    # Full interactive pipeline
-    $SCRIPT_NAME --profile work                     # Use specific profile
-    $SCRIPT_NAME --duration 480                     # 8-minute segments
-    $SCRIPT_NAME --keep-intermediate                # Keep downloaded files
-    $SCRIPT_NAME --dry-run                          # Preview what would happen
+DOWNLOAD SUBCOMMAND:
+    Download audiobooks from your Audible library with interactive selection.
+    
+    Usage: $SCRIPT_NAME download [OPTIONS]
+    
+    Options:
+        -a, --all                Download all audiobooks from library
+        -f, --format FORMAT      Download format: aaxc, aax, pdf (default: aaxc)
+        --activation-bytes BYTES Activation bytes (auto-retrieved if not provided)
+    
+    Examples:
+        $SCRIPT_NAME download                    # Interactive selection
+        $SCRIPT_NAME download --all              # Download all audiobooks
+        $SCRIPT_NAME download --format aax       # Download in AAX format
+
+CONVERT SUBCOMMAND:
+    Convert existing AAX/AAXC files to split MP3 segments.
+    
+    Usage: $SCRIPT_NAME convert [OPTIONS] <input_file> [input_file2...]
+    
+    Options:
+        --activation-bytes BYTES Activation bytes (auto-retrieved if not provided)
+        --title TITLE           Override book title (default: extracted from file)
+    
+    Examples:
+        $SCRIPT_NAME convert book.aaxc                           # Convert single file
+        $SCRIPT_NAME convert *.aaxc                              # Convert multiple files
+        $SCRIPT_NAME convert book.aax --title "My Book"          # Custom title
+        $SCRIPT_NAME convert book.aax --duration 480             # 8-minute segments
+
+AUTOMATE SUBCOMMAND:
+    Full pipeline: download and convert audiobooks in one step.
+    
+    Usage: $SCRIPT_NAME automate [OPTIONS]
+    
+    Combines download and convert functionality with interactive selection.
+    
+    Examples:
+        $SCRIPT_NAME automate                    # Full interactive pipeline
+        $SCRIPT_NAME automate --profile work     # Use specific profile
+        $SCRIPT_NAME automate --duration 480     # 8-minute segments
 
 DEPENDENCIES:
     - uvx (for audible-cli)
@@ -140,6 +169,82 @@ check_dependencies() {
     fi
 }
 
+get_system_info() {
+    local detected_cores
+    detected_cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "4")
+    
+    local cpu_model=""
+    local cpu_arch=""
+    local total_memory=""
+    
+    if command -v lscpu &>/dev/null; then
+        cpu_model=$(lscpu | grep "Model name" | cut -d: -f2 | xargs)
+        cpu_arch=$(lscpu | grep "Architecture" | cut -d: -f2 | xargs)
+    elif [ -f /proc/cpuinfo ]; then
+        cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+        cpu_arch=$(uname -m)
+    fi
+    
+    if command -v free &>/dev/null; then
+        total_memory=$(free -h | grep "^Mem:" | awk '{print $2}')
+    elif command -v sysctl &>/dev/null; then
+        total_memory=$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1024/1024/1024)"G"}')
+    fi
+    
+    echo "$detected_cores|$cpu_model|$cpu_arch|$total_memory"
+}
+
+calculate_optimal_threads() {
+    local system_info
+    system_info=$(get_system_info)
+    
+    local detected_cores cpu_model cpu_arch total_memory
+    IFS='|' read -r detected_cores cpu_model cpu_arch total_memory <<< "$system_info"
+    
+    local cpu_count
+    
+    # Intelligent thread count based on system characteristics
+    if [[ "$cpu_model" == *"AMD"* ]] && [[ "$cpu_model" == *"Ryzen"* ]] && [ "$detected_cores" -gt 16 ]; then
+        # AMD Ryzen with many cores - use more threads
+        cpu_count=$((detected_cores / 2))
+    elif [[ "$cpu_model" == *"Intel"* ]] && [[ "$cpu_model" == *"Xeon"* ]] && [ "$detected_cores" -gt 12 ]; then
+        # Intel Xeon - server grade, can handle more threads
+        cpu_count=$((detected_cores / 2))
+    elif [[ "$cpu_arch" == *"aarch64"* ]] || [[ "$cpu_arch" == *"arm64"* ]]; then
+        # ARM processors (like Apple Silicon) - different threading characteristics
+        cpu_count=$((detected_cores < 12 ? detected_cores : 12))
+    elif [ "$detected_cores" -gt 8 ]; then
+        # Generic cap for unknown processors
+        cpu_count=8
+    else
+        cpu_count="$detected_cores"
+    fi
+    
+    # Memory consideration - if low memory, reduce threads
+    if [[ "$total_memory" =~ ^[0-9]+G$ ]]; then
+        local memory_gb=${total_memory%G}
+        if [ "$memory_gb" -lt 8 ] && [ "$cpu_count" -gt 4 ]; then
+            cpu_count=4
+        fi
+    fi
+    
+    echo "$cpu_count|$cpu_model|$total_memory"
+}
+
+log_performance_info() {
+    local thread_info
+    thread_info=$(calculate_optimal_threads)
+    
+    local cpu_count cpu_model total_memory
+    IFS='|' read -r cpu_count cpu_model total_memory <<< "$thread_info"
+    
+    if command -v gum &> /dev/null; then
+        gum style --foreground 226 "⚡ Performance: Using $cpu_count threads | CPU: $cpu_model | RAM: $total_memory"
+    else
+        echo "PERFORMANCE: Using $cpu_count threads | CPU: $cpu_model | RAM: $total_memory"
+    fi
+}
+
 get_activation_bytes() {
     if [[ -n "$ACTIVATION_BYTES" ]]; then
         echo "$ACTIVATION_BYTES"
@@ -179,7 +284,7 @@ get_library_list() {
     
     for format in "${export_formats[@]}"; do
         local test_cmd="$cmd $format"
-        log_info "Trying: $test_cmd" >&2  # Send debug output to stderr
+        log_info "Trying: $test_cmd" >&2
         
         local library_output
         if library_output=$(eval "$test_cmd" 2>/dev/null); then
@@ -313,11 +418,18 @@ convert_to_m4b() {
     local activation_bytes="$3"
     
     log_step "Converting $(basename "$input_file") to M4B"
+    log_performance_info
     
     if [[ "$DRY_RUN" == true ]]; then
         log_info "DRY RUN: Would convert $input_file to $output_file"
         return 0
     fi
+    
+    # Get optimal thread count
+    local thread_info
+    thread_info=$(calculate_optimal_threads)
+    local cpu_count
+    cpu_count=$(echo "$thread_info" | cut -d'|' -f1)
     
     # Check if input file needs activation bytes (AAX format)
     if [[ "$input_file" == *.aax ]]; then
@@ -325,10 +437,29 @@ convert_to_m4b() {
             log_error "Activation bytes required for AAX files"
             return 1
         fi
-        ffmpeg -y -activation_bytes "$activation_bytes" -i "$input_file" -c copy "$output_file"
+        ffmpeg -y \
+            -threads "$cpu_count" \
+            -fflags +fastseek+genpts \
+            -analyzeduration 1000000 \
+            -probesize 1000000 \
+            -thread_queue_size 512 \
+            -activation_bytes "$activation_bytes" \
+            -i "$input_file" \
+            -c copy \
+            -threads "$cpu_count" \
+            "$output_file"
     else
         # AAXC files don't need activation bytes
-        ffmpeg -y -i "$input_file" -c copy "$output_file"
+        ffmpeg -y \
+            -threads "$cpu_count" \
+            -fflags +fastseek+genpts \
+            -analyzeduration 1000000 \
+            -probesize 1000000 \
+            -thread_queue_size 512 \
+            -i "$input_file" \
+            -c copy \
+            -threads "$cpu_count" \
+            "$output_file"
     fi
     
     if [[ $? -eq 0 ]]; then
@@ -344,6 +475,23 @@ sanitize_filename() {
     local filename="$1"
     # Remove/replace problematic characters for directory names
     echo "$filename" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/_/g' | sed 's/__*/_/g' | sed 's/^_\|_$//g'
+}
+
+extract_title_from_file() {
+    local file="$1"
+    
+    # Try to extract title from ffprobe metadata
+    if command -v ffprobe &> /dev/null; then
+        local title
+        title=$(ffprobe -v quiet -show_entries format_tags=title -of csv=p=0 "$file" 2>/dev/null)
+        if [[ -n "$title" ]]; then
+            echo "$title"
+            return 0
+        fi
+    fi
+    
+    # Fallback to filename without extension
+    basename "$file" | sed 's/\.[^.]*$//'
 }
 
 split_to_mp3() {
@@ -393,78 +541,200 @@ cleanup_intermediate_files() {
     done
 }
 
-parse_arguments() {
+# Subcommand implementations
+
+cmd_download() {
+    local download_all=false
+    local download_format="aaxc"
+    
+    # Parse download-specific arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -p|--profile)
-                PROFILE="$2"
+            -a|--all)
+                download_all=true
+                shift
+                ;;
+            -f|--format)
+                download_format="$2"
                 shift 2
                 ;;
-            -a|--activation-bytes)
+            --activation-bytes)
                 ACTIVATION_BYTES="$2"
                 shift 2
                 ;;
-            -d|--duration)
-                SEGMENT_DURATION="$2"
-                shift 2
-                ;;
-            -o|--output-dir)
-                OUTPUT_DIR="$2"
-                shift 2
-                ;;
-            -t|--temp-dir)
-                TEMP_DIR="$2"
-                shift 2
-                ;;
-            -k|--keep-intermediate)
-                KEEP_INTERMEDIATE=true
-                shift
-                ;;
-            -n|--dry-run)
-                DRY_RUN=true
-                shift
-                ;;
-            --test-library)
-                TEST_LIBRARY=true
-                shift
-                ;;
-            -h|--help)
-                show_help
-                exit 0
-                ;;
             *)
-                log_error "Unknown option: $1"
-                show_help
+                log_error "Unknown download option: $1"
                 exit 1
                 ;;
         esac
     done
-}
-
-main() {
-    parse_arguments "$@"
     
-    check_dependencies
+    log_step "Download Mode: Getting audiobooks from Audible"
     
-    # Special test mode for debugging library listing
-    if [[ "$TEST_LIBRARY" == true ]]; then
-        log_step "Testing library listing functionality"
-        local library_json
-        library_json=$(get_library_list 2>/dev/null)  # Suppress debug output for clean test
-        
-        echo "=== RAW LIBRARY OUTPUT ==="
-        echo "$library_json"
-        echo
-        
-        echo "=== PARSED LIBRARY OUTPUT ==="
-        local library_list
-        library_list=$(parse_library_for_selection "$library_json" 2>/dev/null)
-        echo "$library_list"
-        echo
-        
-        log_success "Library test complete"
+    # Get library and selection
+    local library_json
+    library_json=$(get_library_list)
+    
+    local library_list
+    library_list=$(parse_library_for_selection "$library_json")
+    
+    local selected_books
+    if [[ "$download_all" == true ]]; then
+        selected_books="$library_list"
+        log_info "Downloading all $(echo "$library_list" | wc -l) audiobooks"
+    else
+        selected_books=$(interactive_selection "$library_list")
+    fi
+    
+    if [[ -z "$selected_books" ]]; then
+        log_info "No books selected, exiting"
         exit 0
     fi
+    
+    # Download each selected book
+    local downloaded_count=0
+    local failed_count=0
+    
+    while IFS= read -r book_line; do
+        if [[ -z "$book_line" ]]; then continue; fi
+        
+        # Parse the selection line: "title | asin | format"
+        local title asin format
+        title=$(echo "$book_line" | cut -d'|' -f1 | xargs)
+        asin=$(echo "$book_line" | cut -d'|' -f2 | xargs)
+        format=$(echo "$book_line" | cut -d'|' -f3 | xargs)
+        
+        # Use user-specified format if provided, otherwise use detected format
+        if [[ "$download_format" != "aaxc" ]]; then
+            format="$download_format"
+        fi
+        
+        log_step "Downloading: $title ($asin) [$format]"
+        
+        if download_audiobook "$asin" "$format"; then
+            ((downloaded_count++))
+            log_success "Downloaded: $title"
+        else
+            ((failed_count++))
+            log_error "Failed to download: $title"
+        fi
+        
+    done <<< "$selected_books"
+    
+    # Summary
+    log_success "Download complete!"
+    log_info "Successfully downloaded: $downloaded_count audiobook(s)"
+    if [[ $failed_count -gt 0 ]]; then
+        log_error "Failed to download: $failed_count audiobook(s)"
+    fi
+    log_info "Downloaded files in: $TEMP_DIR"
+}
+
+cmd_convert() {
+    local input_files=()
+    local custom_title=""
+    
+    # Parse convert-specific arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --activation-bytes)
+                ACTIVATION_BYTES="$2"
+                shift 2
+                ;;
+            --title)
+                custom_title="$2"
+                shift 2
+                ;;
+            -*)
+                log_error "Unknown convert option: $1"
+                exit 1
+                ;;
+            *)
+                input_files+=("$1")
+                shift
+                ;;
+        esac
+    done
+    
+    if [[ ${#input_files[@]} -eq 0 ]]; then
+        log_error "No input files specified for conversion"
+        log_error "Usage: $SCRIPT_NAME convert [OPTIONS] <input_file> [input_file2...]"
+        exit 1
+    fi
+    
+    # Get activation bytes if needed
+    local activation_bytes
+    activation_bytes=$(get_activation_bytes)
+    
+    log_step "Convert Mode: Processing ${#input_files[@]} file(s)"
+    
+    local converted_count=0
+    local failed_count=0
+    
+    for input_file in "${input_files[@]}"; do
+        if [[ ! -f "$input_file" ]]; then
+            log_error "Input file not found: $input_file"
+            ((failed_count++))
+            continue
+        fi
+        
+        # Validate file format
+        if [[ ! "$input_file" =~ \.(aax|aaxc)$ ]]; then
+            log_error "Unsupported file format: $input_file (only .aax and .aaxc supported)"
+            ((failed_count++))
+            continue
+        fi
+        
+        # Extract or use custom title
+        local book_title
+        if [[ -n "$custom_title" ]]; then
+            book_title="$custom_title"
+        else
+            book_title=$(extract_title_from_file "$input_file")
+        fi
+        
+        log_step "Processing: $book_title ($(basename "$input_file"))"
+        
+        # Convert to M4B
+        local m4b_file="${input_file%.*}.m4b"
+        if ! convert_to_m4b "$input_file" "$m4b_file" "$activation_bytes"; then
+            log_error "Failed to convert: $(basename "$input_file")"
+            ((failed_count++))
+            continue
+        fi
+        
+        # Split to MP3
+        if ! split_to_mp3 "$m4b_file" "$book_title"; then
+            log_error "Failed to split: $(basename "$m4b_file")"
+            ((failed_count++))
+            continue
+        fi
+        
+        # Cleanup intermediate M4B if not keeping
+        if [[ "$KEEP_INTERMEDIATE" == false ]]; then
+            if [[ "$DRY_RUN" == true ]]; then
+                log_info "DRY RUN: Would remove $m4b_file"
+            else
+                rm -f "$m4b_file"
+            fi
+        fi
+        
+        ((converted_count++))
+        log_success "Completed: $book_title"
+        
+    done
+    
+    # Summary
+    log_success "Conversion complete!"
+    log_info "Successfully converted: $converted_count audiobook(s)"
+    if [[ $failed_count -gt 0 ]]; then
+        log_error "Failed to convert: $failed_count audiobook(s)"
+    fi
+    log_info "Output directory: $OUTPUT_DIR"
+}
+
+cmd_automate() {
+    log_step "Automate Mode: Full download and convert pipeline"
     
     # Step 1: Get activation bytes
     log_step "Step 1: Getting activation bytes"
@@ -555,6 +825,90 @@ main() {
         log_error "Failed to process: $failed_count audiobook(s)"
     fi
     log_info "Output directory: $OUTPUT_DIR"
+}
+
+parse_global_arguments() {
+    local subcommand=""
+    local global_args=()
+    local subcommand_args=()
+    local found_subcommand=false
+    
+    # First pass: separate global args from subcommand and its args
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            download|convert|automate)
+                subcommand="$1"
+                found_subcommand=true
+                shift
+                break
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -p|--profile)
+                PROFILE="$2"
+                shift 2
+                ;;
+            -d|--duration)
+                SEGMENT_DURATION="$2"
+                shift 2
+                ;;
+            -o|--output-dir)
+                OUTPUT_DIR="$2"
+                shift 2
+                ;;
+            -t|--temp-dir)
+                TEMP_DIR="$2"
+                shift 2
+                ;;
+            -k|--keep-intermediate)
+                KEEP_INTERMEDIATE=true
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            *)
+                log_error "Unknown global option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+    
+    # Collect remaining args as subcommand args
+    subcommand_args=("$@")
+    
+    if [[ -z "$subcommand" ]]; then
+        log_error "No subcommand specified"
+        show_help
+        exit 1
+    fi
+    
+    # Execute the subcommand
+    case "$subcommand" in
+        download)
+            cmd_download "${subcommand_args[@]}"
+            ;;
+        convert)
+            cmd_convert "${subcommand_args[@]}"
+            ;;
+        automate)
+            cmd_automate "${subcommand_args[@]}"
+            ;;
+        *)
+            log_error "Unknown subcommand: $subcommand"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+main() {
+    check_dependencies
+    parse_global_arguments "$@"
 }
 
 main "$@"
