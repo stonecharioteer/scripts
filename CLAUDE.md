@@ -45,102 +45,89 @@ Personal utility scripts for automation and file processing tasks. Scripts range
 
 ## Development Log
 
-### Conversation Management Strategy
-- Store our conversation in `conversation.md` so that we record everything we talk about locally and don't forget when disconnected or if the process is killed
+(Rest of the existing content remains the same)
 
-### audiobook-split.sh Implementation (Session: 2025-07-01)
+## Development Reminders
+- Update the README whenever you change the scripts
+- Test end-to-end functionality after major changes
+- Consider corrupted source files when designing audio processing workflows
+- **Read the code for scripts before attempting to use them.**
+- Use ripgrep instead of grep when you're searching for things. I'll always have that installed. Just in your context, not in the code itself, unless I say so otherwise.
 
-Created a comprehensive audiobook splitting script with the following features:
+### Enhanced Auto-Conversion and Modular Design (Session: 2025-07-09)
 
-#### Initial Implementation
-- **Purpose**: Split audiobooks (m4a, m4b, mp3) into smaller segments for easier MP3 player usage
-- **Default segment size**: 5 minutes (300 seconds), configurable
-- **Output format**: MP3 files with 128k bitrate
-- **Filename sanitization**: FAT32-compatible (lowercase, no special chars, underscores replace spaces)
-- **Numbering**: 4-digit zero-padded segments (0001-9999) for proper sorting on MP3 players
+Major enhancement to audiobook-pipeline.sh with smart auto-conversion, comprehensive help system, and modular command separation.
 
-#### Architecture Evolution
-1. **Initial approach**: Parallel processing with multiple ffmpeg instances
-2. **Problem identified**: High RAM usage due to multiple processes reading large files
-3. **Final solution**: ffmpeg's built-in segment muxer (-f segment) for efficiency
+#### Auto-Conversion Enhancement
+- **Problem**: Auto-conversion after download wasn't working due to unreliable file detection
+- **Solution**: Enhanced `download_audiobook()` to return actual downloaded filename using before/after file comparison
+- **Result**: Reliable auto-conversion with proper file tracking and error handling
 
-#### Key Features Implemented
-- **Command-line interface**: Argument parsing with help system (-h/--help)
-- **Input validation**: File format checking, duration validation, dependency verification
-- **Output directory option**: -O/--output-dir for custom locations
-- **Progress tracking**: Real-time progress with percentage, elapsed time, and ETA
-- **Compatibility**: Fallback for older gum versions without progress command
-- **Error handling**: Comprehensive validation and cleanup
+#### Comprehensive Help System
+- **Problem**: `-h`/`--help` flags didn't work for subcommands
+- **Solution**: Added dedicated help functions for each subcommand:
+  - `show_download_help()` - Download-specific options and examples
+  - `show_convert_help()` - Convert-specific options and examples  
+  - `show_split_help()` - Split-specific options and examples
+  - `show_automate_help()` - Automate-specific options and examples
+- **Integration**: Added `-h|--help` handling to all subcommand argument parsing
 
-#### Technical Details
-- **Dependencies**: ffmpeg (audio processing), gum (UI styling)
-- **Progress implementation**: Uses ffmpeg's -progress flag for accurate tracking
-- **Memory efficiency**: Single-pass processing, reads file once
-- **Shellcheck validated**: Follows bash best practices
-- **Progress display**: "🔄 45% (02:15 / 17:18:34) | Elapsed: 01:30 | ETA: 02:15"
+#### Smart Download Logic
+- **Enhanced File Detection**: Multi-tier approach for finding existing files:
+  1. ASIN-based search (primary)
+  2. Title-based search (fallback)
+  3. Word-based search (final fallback)
+- **Skip Logic**: Detects already downloaded files and skips re-downloading
+- **Conversion Check**: Only converts if M4B file doesn't exist
+- **Status Reporting**: Clear feedback about existing vs new files
 
-#### Lessons Learned
-- ffmpeg's segment muxer is more efficient than manual parallel processing
-- Progress tracking significantly improves UX for long-running operations
-- Filename sanitization is crucial for cross-platform compatibility
-- Fallback implementations ensure compatibility across different tool versions
+#### Convert Command Enhancement
+- **Auto-Discovery**: When no files specified, scans raw directory for unconverted files
+- **Smart Filtering**: Only processes files missing M4B versions
+- **User Feedback**: Shows which files are skipped and why
+- **Graceful Completion**: Handles "all converted" scenario cleanly
 
-### highlight-manager.sh Implementation (Session: 2025-07-07)
+#### Modular Command Separation
+- **Problem**: Convert command was doing both M4B conversion AND MP3 splitting
+- **Solution**: Split responsibilities into separate commands:
+  - `convert` command: Only converts AAX/AAXC → M4B (with chapter preservation)
+  - `split` command: Only handles M4B → MP3 segmentation
+  - `automate` command: Full pipeline (download → convert → split)
 
-Created a comprehensive Kindle highlights management system with DuckDB integration:
+#### New Split Subcommand
+- **Purpose**: Split M4B files into MP3 segments using existing audiobook-split.sh
+- **Auto-Discovery**: Finds all M4B files in converted directory when no args provided
+- **Integration**: Calls audiobook-split.sh with proper arguments and error handling
+- **Features**: 
+  - Supports dry-run mode
+  - Proper file validation (M4B only)
+  - Sanitized output directory naming
+  - Comprehensive status reporting
 
-#### Initial Implementation
-- **Purpose**: Convert Kindle myClippings format to structured database and provide elegant viewing interface
-- **Database**: DuckDB for robust storage with proper schema and indexing
-- **Text processing**: Book/author parsing, content cleaning, duplicate detection via SHA256 hashing
-- **UI**: Beautiful terminal interface using gum for styling and formatting
+#### Implementation Details
+- **File Structure**: Added `cmd_split()` function (lines 1240-1332)
+- **Routing**: Added `split` to subcommand detection and execution routing
+- **Help Integration**: Added split command to main help and subcommand help system
+- **Error Handling**: Comprehensive validation and status reporting throughout
 
-#### Architecture Evolution
-1. **Initial approach**: Direct myClippings parsing with complex bash loops
-2. **Problem identified**: Parsing hang issues and complex quote escaping in SQL
-3. **Intermediate solution**: Two-stage process using JSON conversion + Python/SQLite bridge
-4. **Final approach**: Integrated workflow with DuckDB COPY command and tab-separated output for clean data extraction
+#### Current Workflow
+1. **Download**: `./audiobook-pipeline.sh download` - Downloads and auto-converts to M4B
+2. **Convert**: `./audiobook-pipeline.sh convert` - Converts AAX/AAXC to M4B only
+3. **Split**: `./audiobook-pipeline.sh split` - Splits M4B files to MP3 segments
+4. **Automate**: `./audiobook-pipeline.sh automate` - Full pipeline in one command
 
-#### Key Features Implemented
-- **Integrated architecture**: Single script handling both import and display functionality
-- **Import command**: Processes myClippings.txt with duplicate detection and content normalization
-- **Show command**: Beautiful display with text wrapping, proper spacing, and metadata formatting
-- **Content processing**: Removes trailing spaces, em-dashes, normalizes whitespace
-- **Book/author separation**: Parses "Title (Author)" format into separate database fields
-- **Configurable options**: Custom database path, variable highlight count display
+#### Status
+- ✅ Enhanced download with smart file detection
+- ✅ Auto-conversion with reliable file tracking  
+- ✅ Help system for all subcommands (-h/--help)
+- ✅ Convert command with auto-discovery (M4B only)
+- ✅ Split command implementation and routing
+- ✅ Complete modular separation of concerns
+- ✅ All commands support auto-discovery (no args = process all)
 
-#### Sorting Enhancement (Session: 2025-07-07)
-
-Added flexible sorting functionality to improve highlight organization and user experience:
-
-##### Features Added
-- **--sort-by flag**: Support for `location` or `date_added` sorting fields
-- **--sort-order flag**: Support for `asc` or `desc` ordering
-- **Default behavior**: `location ASC, date_added ASC, book_title ASC` for logical reading order
-- **Alternative sorting**: `--sort-by date_added` changes to `date_added ASC, location ASC, book_title ASC`
-- **Smart UI behavior**: Only prompts for full highlights view when using default count (not when user specifies -n/--number)
-
-##### Technical Implementation
-- **Dynamic ORDER BY clause**: Built at runtime based on user parameters
-- **Input validation**: Validates sort field and order parameters with helpful error messages
-- **Consistent sorting**: Applied to both main display and full highlights viewer
-- **Parameter passing**: Extended function signatures to pass sort parameters through the call chain
-
-##### Usage Examples
-```bash
-./highlight-manager.sh show                                    # Default: location ascending
-./highlight-manager.sh show --sort-by date_added              # Date added ascending  
-./highlight-manager.sh show --sort-by location --sort-order desc  # Location descending
-./highlight-manager.sh show -n 5 --sort-by date_added         # 5 highlights, date sorted, no prompt
-```
-
-##### UX Improvements
-- **Contextual prompts**: Only show "view full highlights" prompt when using default count
-- **Clear documentation**: Updated help text with sorting explanations and examples
-- **Intuitive defaults**: Location-based sorting for logical reading progression
-
-##### Lessons Learned
-- **Smart UI patterns**: Users who specify explicit values (like count) don't want additional prompts
-- **Flexible sorting**: Multiple sort criteria provide better organization for different use cases
-- **Parameter validation**: Early validation with clear error messages improves user experience
-- **Consistent behavior**: Sorting should work the same across all display modes
+#### Benefits Achieved
+- **Separation of Concerns**: Each command has a single, clear responsibility
+- **User Choice**: Users can run individual steps or full automation
+- **Efficiency**: Smart file detection avoids redundant processing
+- **Usability**: Comprehensive help and auto-discovery reduce command complexity
+- **Reliability**: Robust error handling and status reporting throughout

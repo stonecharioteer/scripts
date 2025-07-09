@@ -270,10 +270,10 @@ split_audiobook() {
     local total_memory=""
     
     if command -v lscpu &>/dev/null; then
-        cpu_model=$(lscpu | grep "Model name" | cut -d: -f2 | xargs)
-        cpu_arch=$(lscpu | grep "Architecture" | cut -d: -f2 | xargs)
+        cpu_model=$(lscpu | grep "Model name" | cut -d: -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        cpu_arch=$(lscpu | grep "Architecture" | cut -d: -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     elif [ -f /proc/cpuinfo ]; then
-        cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+        cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         cpu_arch=$(uname -m)
     fi
     
@@ -328,6 +328,7 @@ split_audiobook() {
     
     # Start ffmpeg in background with progress reporting and performance optimizations
     ffmpeg -y \
+        -loglevel warning \
         -threads "$cpu_count" \
         -fflags +fastseek+genpts \
         -analyzeduration 1000000 \

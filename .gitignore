@@ -7,3 +7,7 @@ myClippings.txt
 *.temp
 clippings.json
 highlight-manager-broken.sh
+
+*.json
+*.tsv
+*.csv

@@ -3,9 +3,140 @@ Scripts to help automate small tasks
 
 ## Table of Contents
 
-1. [audiobook-split.sh](#audiobook-splitsh) - Split audiobooks into smaller segments
-2. [gi-select.sh](#gi-selectsh) - Interactive .gitignore file generator
-3. [highlight-manager.sh](#highlight-managersh) - Manage Kindle highlights with DuckDB
+1. [audiobook-pipeline.sh](#audiobook-pipelinesh) - Complete audiobook processing pipeline
+2. [audiobook-split.sh](#audiobook-splitsh) - Split audiobooks into smaller segments
+3. [audible-download.sh](#audible-downloadsh) - Download audiobooks from Audible
+4. [gi-select.sh](#gi-selectsh) - Interactive .gitignore file generator
+5. [highlight-manager.sh](#highlight-managersh) - Manage Kindle highlights with DuckDB
+
+## `audiobook-pipeline.sh`
+
+Modular audiobook processing pipeline with subcommands for different operations: download, convert, or full automation.
+
+**Requirements:**
+- `uvx` for running audible-cli
+- `audible-cli` (automatically installed via uvx)
+- `ffmpeg` (version 4.4+ for AAXC support)
+- `gum` for interactive selection
+- `audiobook-split.sh` (should be in same directory)
+
+**Features:**
+- **Modular design** - Separate subcommands for download, convert, and automate
+- **Automatic M4B conversion** - Downloads automatically convert to M4B with chapter preservation
+- **Organized directory structure** - Separates raw downloads, converted files, and final output
+- **CPU optimization** - Intelligent thread detection and performance optimization like audiobook-split.sh
+- **Interactive selection** - Use gum to choose specific audiobooks from your library
+- **Format conversion** - AAX/AAXC to M4B to MP3 with automatic activation bytes retrieval
+- **Chapter preservation** - Maintains chapter information and metadata during conversion
+- **Multiple file support** - Convert multiple existing files in one command
+- **Progress tracking** - Real-time progress with performance info for each step
+- **Dry-run mode** - Preview what would be processed without doing it
+- **Intermediate file management** - Option to keep or clean up temporary files
+- **Profile support** - Use different Audible accounts/profiles
+
+**Setup:**
+Before using this script, authenticate with Audible:
+```bash
+uvx --from audible-cli audible quickstart
+```
+
+**Usage:**
+```bash
+./audiobook-pipeline.sh <subcommand> [OPTIONS]
+./audiobook-pipeline.sh -h  # Show help
+```
+
+**Subcommands:**
+
+### Download Subcommand
+Download audiobooks from your Audible library with automatic conversion to M4B.
+
+```bash
+./audiobook-pipeline.sh download [OPTIONS]
+```
+
+**Options:**
+- `-a, --all` - Download all audiobooks from library
+- `-f, --format FORMAT` - Download format: aaxc, aax, pdf (default: aaxc)
+- `--activation-bytes BYTES` - Activation bytes (auto-retrieved if not provided)
+- `--no-convert` - Skip automatic conversion to M4B
+
+**Examples:**
+```bash
+./audiobook-pipeline.sh download                    # Interactive selection with auto-conversion
+./audiobook-pipeline.sh download --all              # Download all audiobooks with conversion
+./audiobook-pipeline.sh download --format aax       # Download in AAX format with conversion
+./audiobook-pipeline.sh download --no-convert       # Download only, no conversion
+./audiobook-pipeline.sh download --all --profile work  # Use specific profile
+```
+
+### Convert Subcommand
+Convert existing AAX/AAXC files to split MP3 segments (no download needed).
+
+```bash
+./audiobook-pipeline.sh convert [OPTIONS] <input_file> [input_file2...]
+```
+
+**Options:**
+- `--activation-bytes BYTES` - Activation bytes (auto-retrieved if not provided)
+- `--title TITLE` - Override book title (default: extracted from file metadata)
+
+**Examples:**
+```bash
+./audiobook-pipeline.sh convert book.aaxc                           # Convert single file
+./audiobook-pipeline.sh convert *.aaxc                              # Convert multiple files
+./audiobook-pipeline.sh convert book.aax --title "My Book"          # Custom title
+./audiobook-pipeline.sh convert book.aax --duration 480             # 8-minute segments
+./audiobook-pipeline.sh convert ~/Downloads/*.aaxc --keep-intermediate  # Keep M4B files
+```
+
+### Automate Subcommand
+Full pipeline: download and convert audiobooks in one step (original behavior).
+
+```bash
+./audiobook-pipeline.sh automate [OPTIONS]
+```
+
+**Examples:**
+```bash
+./audiobook-pipeline.sh automate                    # Full interactive pipeline
+./audiobook-pipeline.sh automate --profile work     # Use specific profile
+./audiobook-pipeline.sh automate --duration 480     # 8-minute segments
+./audiobook-pipeline.sh automate --dry-run          # Preview what would happen
+```
+
+**Global Options:**
+- `-p, --profile PROFILE` - Audible profile to use
+- `-d, --duration SECONDS` - Segment duration in seconds (default: 300 = 5 minutes)
+- `-o, --output-dir DIR` - Output directory (default: ~/Audiobooks/OpenSwim)
+- `-t, --temp-dir DIR` - Temporary download directory (default: ~/Audiobooks/audible)
+- `-r, --raw-dir DIR` - Raw download directory (default: ~/Audiobooks/audible/raw)
+- `-c, --converted-dir DIR` - Converted files directory (default: ~/Audiobooks/audible/converted)
+- `-k, --keep-intermediate` - Keep intermediate files (M4B, AAX)
+- `-n, --dry-run` - Show what would be processed without doing it
+
+**Performance Optimization:**
+- **Intelligent threading** - Auto-detects CPU architecture (AMD Ryzen, Intel Xeon, ARM)
+- **Memory-aware** - Adjusts thread count based on available RAM
+- **Performance logging** - Shows thread count, CPU model, and memory info
+- **Optimized ffmpeg** - Uses efficient flags and threading for conversion
+
+**Activation Bytes:**
+- **Auto-retrieval** - Automatically gets activation bytes from audible-cli
+- **AAX files** - Require activation bytes for decryption
+- **AAXC files** - Don't need activation bytes (newer format)
+- **Manual override** - Use `--activation-bytes` if needed
+
+**Directory Structure:**
+```
+~/Audiobooks/audible/raw/        (original AAX/AAXC files)
+~/Audiobooks/audible/converted/  (M4B files with chapters)
+~/Audiobooks/OpenSwim/           (final MP3 files)
+└── BookTitle/                   (one folder per book)
+    ├── booktitle_01.mp3
+    ├── booktitle_02.mp3
+    └── ...
+```
 
 ## `audiobook-split.sh`
 
@@ -54,6 +185,55 @@ Split audiobooks into smaller segments for easier listening or processing using 
 - Performance info: `⚡ Performance: Using 16/32 threads (AMD Ryzen 9 7950X) | RAM: 64G`
 - Post-processing analysis with file statistics and outlier detection
 
+## `audible-download.sh`
+
+Download audiobooks from Audible using audible-cli with comprehensive configuration options.
+
+**Requirements:**
+- `uvx` for running audible-cli
+- `audible-cli` (installed via uvx)
+- `gum` for prettier terminal output (optional)
+
+**Features:**
+- **Multiple download formats** - AAXC, AAX, and PDF support
+- **Flexible filtering** - Download by date range or all audiobooks
+- **Profile support** - Use different Audible accounts/profiles
+- **Dry-run mode** - Preview what would be downloaded without downloading
+- **Custom output directory** - Specify download location (default: ~/Audiobooks/audible)
+- **Progress tracking** - Real-time download progress with verbose levels
+- **Input validation** - Validates dates, formats, and dependencies
+- **Enhanced UI** - Styled output with gum integration
+
+**Setup:**
+Before using this script, authenticate with Audible:
+```bash
+uvx --from audible-cli audible quickstart
+```
+
+**Usage:**
+```bash
+./audible-download.sh [OPTIONS]
+./audible-download.sh -h  # Show help
+```
+
+**Options:**
+- `-d, --download-dir DIR` - Download directory (default: ~/Audiobooks/audible)
+- `-p, --profile PROFILE` - Audible profile to use
+- `-f, --format FORMAT` - Download format: aaxc, aax, pdf (default: aaxc)
+- `-a, --all` - Download all audiobooks from library
+- `-s, --start-date DATE` - Download books added after this date (YYYY-MM-DD)
+- `-e, --end-date DATE` - Download books added before this date (YYYY-MM-DD)
+- `-v, --verbose LEVEL` - Verbose level: debug, info, warning, error (default: info)
+- `-n, --dry-run` - Show what would be downloaded without downloading
+
+**Examples:**
+```bash
+./audible-download.sh --all                              # Download all audiobooks
+./audible-download.sh --all --format aax                 # Download all as AAX format
+./audible-download.sh --start-date "2023-01-01" --all    # Download books added after Jan 1, 2023
+./audible-download.sh --profile work --all               # Use specific profile
+./audible-download.sh --dry-run --all                    # Preview what would be downloaded
+```
 
 ## `gi-select.sh`
 
