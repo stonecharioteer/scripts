@@ -22,10 +22,12 @@ Modular audiobook processing pipeline with subcommands for different operations:
 
 **Features:**
 - **Modular design** - Separate subcommands for download, convert, and automate
+- **Automatic M4B conversion** - Downloads automatically convert to M4B with chapter preservation
+- **Organized directory structure** - Separates raw downloads, converted files, and final output
 - **CPU optimization** - Intelligent thread detection and performance optimization like audiobook-split.sh
 - **Interactive selection** - Use gum to choose specific audiobooks from your library
 - **Format conversion** - AAX/AAXC to M4B to MP3 with automatic activation bytes retrieval
-- **Organized output** - Creates individual folders for each book in OpenSwim directory
+- **Chapter preservation** - Maintains chapter information and metadata during conversion
 - **Multiple file support** - Convert multiple existing files in one command
 - **Progress tracking** - Real-time progress with performance info for each step
 - **Dry-run mode** - Preview what would be processed without doing it
@@ -47,7 +49,7 @@ uvx --from audible-cli audible quickstart
 **Subcommands:**
 
 ### Download Subcommand
-Download audiobooks from your Audible library (no conversion).
+Download audiobooks from your Audible library with automatic conversion to M4B.
 
 ```bash
 ./audiobook-pipeline.sh download [OPTIONS]
@@ -57,12 +59,14 @@ Download audiobooks from your Audible library (no conversion).
 - `-a, --all` - Download all audiobooks from library
 - `-f, --format FORMAT` - Download format: aaxc, aax, pdf (default: aaxc)
 - `--activation-bytes BYTES` - Activation bytes (auto-retrieved if not provided)
+- `--no-convert` - Skip automatic conversion to M4B
 
 **Examples:**
 ```bash
-./audiobook-pipeline.sh download                    # Interactive selection
-./audiobook-pipeline.sh download --all              # Download all audiobooks
-./audiobook-pipeline.sh download --format aax       # Download in AAX format
+./audiobook-pipeline.sh download                    # Interactive selection with auto-conversion
+./audiobook-pipeline.sh download --all              # Download all audiobooks with conversion
+./audiobook-pipeline.sh download --format aax       # Download in AAX format with conversion
+./audiobook-pipeline.sh download --no-convert       # Download only, no conversion
 ./audiobook-pipeline.sh download --all --profile work  # Use specific profile
 ```
 
@@ -106,6 +110,8 @@ Full pipeline: download and convert audiobooks in one step (original behavior).
 - `-d, --duration SECONDS` - Segment duration in seconds (default: 300 = 5 minutes)
 - `-o, --output-dir DIR` - Output directory (default: ~/Audiobooks/OpenSwim)
 - `-t, --temp-dir DIR` - Temporary download directory (default: ~/Audiobooks/audible)
+- `-r, --raw-dir DIR` - Raw download directory (default: ~/Audiobooks/audible/raw)
+- `-c, --converted-dir DIR` - Converted files directory (default: ~/Audiobooks/audible/converted)
 - `-k, --keep-intermediate` - Keep intermediate files (M4B, AAX)
 - `-n, --dry-run` - Show what would be processed without doing it
 
@@ -123,9 +129,10 @@ Full pipeline: download and convert audiobooks in one step (original behavior).
 
 **Directory Structure:**
 ```
-~/Audiobooks/audible/          (temporary downloads)
-~/Audiobooks/OpenSwim/         (final MP3 files)
-└── BookTitle/                 (one folder per book)
+~/Audiobooks/audible/raw/        (original AAX/AAXC files)
+~/Audiobooks/audible/converted/  (M4B files with chapters)
+~/Audiobooks/OpenSwim/           (final MP3 files)
+└── BookTitle/                   (one folder per book)
     ├── booktitle_01.mp3
     ├── booktitle_02.mp3
     └── ...
