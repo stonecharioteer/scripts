@@ -11,6 +11,8 @@ Scripts to help automate small tasks
 
 ## `audiobook-pipeline.sh`
 
+I needed a complete solution to manage audiobooks from Audible all the way to loading them into my Shokz OpenSwim headphones. This script provides an alternative to existing audiobook management tools by offering a complete pipeline that handles downloading, conversion, and splitting in one cohesive workflow.
+
 Modular audiobook processing pipeline with subcommands for different operations: download, convert, or full automation.
 
 **Requirements:**
@@ -140,6 +142,8 @@ Full pipeline: download and convert audiobooks in one step (original behavior).
 
 ## `audiobook-split.sh`
 
+I needed to split audiobooks into smaller segments specifically for compatibility with my Shokz OpenSwim headphones, which work better with shorter audio files during swimming workouts.
+
 Split audiobooks into smaller segments for easier listening or processing using ffmpeg's efficient segment muxer.
 
 **Requirements:**
@@ -186,6 +190,8 @@ Split audiobooks into smaller segments for easier listening or processing using 
 - Post-processing analysis with file statistics and outlier detection
 
 ## `audible-download.sh`
+
+The audible-cli tool isn't trivial to use for bulk operations, so I needed a wrapper script to simplify downloading all my books from Audible with better configuration options and user experience.
 
 Download audiobooks from Audible using audible-cli with comprehensive configuration options.
 
@@ -237,6 +243,8 @@ uvx --from audible-cli audible quickstart
 
 ## `gi-select.sh`
 
+I needed a more usable way to maintain gitignore files across different projects, with plans to enhance this further in the future.
+
 This script helps create a `.gitignore` from `github.com/github/gitignore`'s 
 list of files.
 
@@ -247,6 +255,8 @@ Link this file as `gi-select` for convenience
 ![gi-select](./docs/gi-select.png)
 
 ## `highlight-manager.sh`
+
+I read on multiple digital devices and use KOReader everywhere, but it doesn't sync highlights well across devices. I don't want to use the kohighlights plugin for Calibre because that would require using Calibre to maintain the library on all devices. Instead, I export highlights in myClippings.txt format from each device and use this script to consolidate them all in one place.
 
 Comprehensive Kindle highlights management system with DuckDB integration for storage, organization, and beautiful terminal display.
 

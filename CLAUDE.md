@@ -36,6 +36,7 @@ Personal utility scripts for automation and file processing tasks. Scripts range
 - **Documentation**: Comprehensive README updates with features, examples, and technical details
 - **Git workflow**: Feature branches with descriptive commit messages, squash merges preferred
 - **Smart UI patterns**: Only show optional prompts when using default values, not when user specifies explicit values
+- **Documentation context**: Always include a brief "why" paragraph at the start of each script's README section explaining the real-world problem it solves and the specific use case, before diving into technical details
 
 ## Development Workflow Guidelines
 - **Remember to not commit to main.**
