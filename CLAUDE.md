@@ -132,3 +132,171 @@ Major enhancement to audiobook-pipeline.sh with smart auto-conversion, comprehen
 - **Efficiency**: Smart file detection avoids redundant processing
 - **Usability**: Comprehensive help and auto-discovery reduce command complexity
 - **Reliability**: Robust error handling and status reporting throughout
+
+### Power Monitor Enhanced Alternative Detection (Session: 2025-07-11)
+
+Major improvements to power monitoring system's network detection reliability and user feedback, fixing database compatibility issues and adding comprehensive alternative detection methods.
+
+#### Database and SQL Compatibility Fixes
+- **Problem**: Multiple DuckDB compatibility issues causing failures in status/uptime commands
+- **Solution**: 
+  - Fixed `julianday()` function calls → `EXTRACT('epoch' FROM timestamp)` for DuckDB compatibility
+  - Created `execute_sql_clean()` function using `duckdb -noheader -list` for clean pipe-delimited output
+  - Updated all data parsing to handle clean output format instead of table-formatted results
+  - Fixed MAC address truncation by using `cut -d: -f2-` to preserve full MAC addresses
+- **Result**: All commands (record, status, uptime) now work correctly with proper data parsing
+
+#### Enhanced Alternative Network Detection
+- **Problem**: Devices not responding to ping were marked as failed even if reachable via other methods
+- **Solution**: Implemented robust three-stage detection process:
+  1. **Primary**: Standard ping + MAC validation
+  2. **Alternative Method 1**: Check ARP table for existing entry with correct MAC
+  3. **Alternative Method 2**: Refresh ARP cache and re-check
+- **Enhanced User Messaging**: Added informative messages for all alternative detection scenarios:
+  - Interactive mode: Color-coded with emojis (`⚠`, `✓`, `⟳`, `✗`)
+  - Non-interactive mode: Plain text INFO/WARNING messages suitable for cron logs
+  - **Device Context**: All messages include label, IP, and room (`fridge (192.168.100.110, vinay-bedroom)`)
+
+#### Database Relationship Management
+- **Problem**: Foreign key constraint errors when switches/rooms didn't exist in database
+- **Solution**: 
+  - Auto-create rooms before inserting switch status
+  - Auto-create/update switches before inserting status records
+  - Fixed DuckDB syntax issues (`INSERT OR IGNORE` → `INSERT ... ON CONFLICT ... DO NOTHING`)
+- **Result**: Robust database operations that handle missing entities gracefully
+
+#### Alternative Detection Message Examples
+```bash
+# Interactive Mode Examples:
+⚠ fridge (192.168.100.110, vinay-bedroom) not responding to ping, checking ARP table...
+✓ fridge (192.168.100.110, vinay-bedroom) detected via ARP table (ping failed but MAC verified)
+⟳ Refreshing ARP cache for fridge (192.168.100.110, vinay-bedroom)...
+✓ fridge (192.168.100.110, vinay-bedroom) detected after ARP refresh (ping failed but MAC verified)
+✗ fridge (192.168.100.110, vinay-bedroom) not reachable via ping or ARP table
+
+# Non-Interactive Mode Examples (cron-friendly):
+INFO: fridge (192.168.100.110, vinay-bedroom) not responding to ping, checking ARP table
+INFO: fridge (192.168.100.110, vinay-bedroom) detected via ARP table (ping failed but MAC verified)
+INFO: Refreshing ARP cache for fridge (192.168.100.110, vinay-bedroom)
+WARNING: fridge (192.168.100.110, vinay-bedroom) not reachable via ping or ARP table
+```
+
+#### Technical Implementation Details
+- **Function Signatures**: Updated `check_switch_authentic()` to accept label and room parameters
+- **Message Context**: All alternative detection messages include device identification (label, IP, room)
+- **Database Fields**: Added `alternative_method_used` tracking for monitoring/analysis
+- **Error Handling**: Comprehensive validation and graceful fallbacks throughout detection process
+- **Auto-Detection**: Maintains existing auto-detection of non-interactive environments
+
+#### Benefits Achieved
+- **Reliability**: Devices with ping disabled/blocked are still properly detected and monitored
+- **Visibility**: Users can identify network configuration issues and device behavior patterns
+- **Debugging**: Clear context about which devices and rooms are experiencing issues
+- **Automation-Friendly**: Clean log messages suitable for automated monitoring systems
+- **Database Integrity**: Robust schema management prevents foreign key constraint errors
+
+#### Status
+- ✅ Enhanced alternative detection with three-stage validation process
+- ✅ Comprehensive user messaging with device context (label, IP, room)
+- ✅ Database compatibility fixes for all DuckDB operations
+- ✅ Clean SQL output parsing for all status/uptime commands
+- ✅ Auto-creation of missing database entities (rooms, switches)
+- ✅ Full MAC address preservation in database records
+- ✅ Non-interactive mode support for cron job automation
+
+#### Real-World Impact
+This enhancement solves common smart home monitoring challenges where devices:
+- Disable ICMP/ping for security or power-saving reasons
+- Use firewalls that block ping while allowing other traffic
+- Are intermittently reachable but maintain ARP table presence
+- Require network diagnostics with clear device identification
+
+The system now provides enterprise-grade network monitoring reliability with user-friendly diagnostic feedback.
+
+### Power Monitor System Development (Session: 2025-07-11)
+
+Comprehensive power monitoring system for house and room-level power status tracking with backup-aware logic, MAC address validation, and beautiful gum-based UI.
+
+#### Problem Statement
+Need to monitor house power status by checking smart switch connectivity to distinguish between main power and backup power operation. Critical requirement: some switches are connected to backup power and must always be online - if they're offline, it indicates backup system failure which affects the monitoring system itself.
+
+#### Architecture Overview
+- **Modular Design**: Separated into lib/ modules for database, network, power logic, config, and UI
+- **Backup-Aware Logic**: Differentiates main power switches from backup-connected switches
+- **MAC Validation**: Prevents false positives from IP address conflicts using ARP table verification
+- **Database Storage**: DuckDB for historical data with future migration path to Prometheus/InfluxDB
+- **Beautiful UI**: Gum-styled tables with color-coded status displays
+
+#### Power State Logic
+- **Main Power Status**: Based on non-backup switches (≥50% online = power available)
+- **Backup Power Status**: ALL backup-connected switches must be online
+- **System States**:
+  - `ONLINE` (Green): Main power available, all systems normal
+  - `BACKUP` (Yellow): Running on backup power (main power lost)
+  - `CRITICAL` (Red): Backup power failed, system at risk
+  - `OFFLINE` (Red): No power detected anywhere
+
+#### Key Components
+
+**File Structure**:
+```
+power-monitor/
+├── power-monitor.sh           # Main script with subcommands
+├── lib/
+│   ├── database.sh           # DuckDB operations and abstractions
+│   ├── network.sh            # Switch connectivity + MAC validation
+│   ├── power-logic.sh        # Backup-aware power state calculations
+│   ├── config.sh             # Configuration loading and validation
+│   └── ui.sh                 # Gum UI components and color styling
+├── config/
+│   └── switches.json         # Switch definitions with backup-connected field
+└── sql/
+    ├── init.sql              # Database schema initialization
+    └── queries.sql           # Common SQL queries
+```
+
+**Database Schema**:
+- `switches` table: Switch definitions with backup_connected field
+- `power_status` table: House-level power tracking with main/backup separation
+- `room_power_status` table: Room-level power tracking
+- `switch_status` table: Individual switch status with ping/MAC validation results
+
+**Network Validation**:
+- Two-stage validation: ping connectivity + ARP MAC address verification
+- Prevents false positives from IP conflicts or device replacements
+- Real-time progress feedback during network checks
+
+#### Subcommands Implementation
+- `record`: Check switches, validate MAC, calculate power states, store in database
+- `status`: Display current power status with room breakdown and uptime
+- `uptime`: Show house/room uptime with power mode awareness
+- `history`: Outage analysis with main power vs backup failure differentiation
+- `rooms`: Room management and statistics
+- `init`: Initialize database and directory structure
+
+#### UI Design
+- Color-coded status displays: Green (ONLINE), Yellow (BACKUP/PARTIAL), Red (CRITICAL/OFFLINE)
+- Gum-styled tables with consistent formatting
+- Real-time progress indicators for network operations
+- Interactive room selection and navigation
+- System status headers showing current power mode
+
+#### Critical Infrastructure Monitoring
+- Backup-connected switches have higher priority in monitoring
+- Failed backup switches trigger CRITICAL system state
+- Enhanced logging for backup system events
+- Script recognizes its own dependency on backup power
+
+#### Future Migration Strategy
+- Database abstraction layer for easy migration to Prometheus/InfluxDB
+- Time series data structure compatible with Grafana visualization
+- Modular components allow individual replacement/upgrade
+- Clear separation of storage logic from business logic
+
+#### Development Patterns Applied
+- Comprehensive help system for all subcommands (-h/--help)
+- Error handling with meaningful messages and color feedback
+- Progress indicators for long-running operations
+- Dependency validation and graceful degradation
+- Follows existing codebase patterns for consistency
+- Documentation-first approach with detailed README
