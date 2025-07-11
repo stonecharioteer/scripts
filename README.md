@@ -8,6 +8,7 @@ Scripts to help automate small tasks
 3. [audible-download.sh](#audible-downloadsh) - Download audiobooks from Audible
 4. [gi-select.sh](#gi-selectsh) - Interactive .gitignore file generator
 5. [highlight-manager.sh](#highlight-managersh) - Manage Kindle highlights with DuckDB
+6. [power-monitor](#power-monitor) - House and room-level power monitoring system
 
 ## `audiobook-pipeline.sh`
 
@@ -383,3 +384,167 @@ Comprehensive Kindle highlights management system with DuckDB integration for st
 - `content` - Full highlight text (cleaned and normalized)
 - `content_hash` - SHA256 hash for duplicate detection
 - `created_at` - Import timestamp
+
+## Power Monitor
+
+I needed a reliable way to monitor my house power status and distinguish between normal operation, backup power operation, and critical system failures. This is especially important in a smart home setup with backup power systems where certain switches are connected to backup power and must always be online - if they go offline, it indicates the monitoring system itself may be at risk.
+
+Comprehensive house and room-level power monitoring system that tracks smart switch connectivity to determine power states with backup-aware logic.
+
+**Requirements:**
+- `duckdb` for database operations
+- `ping` for connectivity testing
+- `arp` or `ip` for MAC address validation
+- `jq` for JSON processing
+- `gum` for beautiful UI (optional, falls back to text mode)
+
+**Architecture:**
+```
+power-monitor/
+├── power-monitor.sh           # Main script with subcommands
+├── lib/                       # Modular library components
+│   ├── database.sh           # DuckDB operations and abstractions
+│   ├── network.sh            # Switch connectivity + MAC validation
+│   ├── power-logic.sh        # Backup-aware power state calculations
+│   ├── config.sh             # Configuration loading and validation
+│   └── ui.sh                 # Gum UI components and color styling
+├── config/
+│   └── switches.json         # Switch definitions with backup-connected field
+└── sql/
+    ├── init.sql              # Database schema initialization
+    └── queries.sql           # Common SQL queries
+```
+
+**Power States:**
+- **ONLINE** (Green) - Main power available, all systems normal
+- **BACKUP** (Yellow) - Running on backup power (main power lost)
+- **CRITICAL** (Red) - Backup power failed, system at risk
+- **OFFLINE** (Red) - No power detected anywhere
+
+**Key Features:**
+- **Backup-Aware Logic** - Distinguishes main power from backup power switches
+- **Enhanced Network Detection** - Three-stage validation: ping → ARP table → ARP refresh with informative user messaging
+- **MAC Address Validation** - Prevents false positives from IP conflicts using ARP table verification
+- **Alternative Detection** - Detects devices that don't respond to ping but are reachable via ARP table
+- **Room-Level Tracking** - Individual room power monitoring and uptime
+- **Beautiful UI** - Color-coded status displays with gum styling (fallback to text mode)
+- **Database Storage** - DuckDB for historical data with future migration path to Prometheus/InfluxDB
+- **Critical Infrastructure Monitoring** - Special handling for backup-connected switches
+- **Comprehensive Help** - Full help system for all subcommands
+- **Modular Design** - Clean separation for easy testing and maintenance
+- **Automation-Friendly** - Non-interactive mode with clean log messages for cron jobs
+
+**Setup:**
+```bash
+# 1. Configure your switches
+cp power-monitor/config/switches.json.example power-monitor/config/switches.json
+# Edit switches.json with your actual switch IP addresses, MAC addresses, and locations
+
+# 2. Initialize the system
+./power-monitor/power-monitor.sh init
+
+# 3. Test connectivity
+./power-monitor/power-monitor.sh record
+
+# 4. View status
+./power-monitor/power-monitor.sh status
+```
+
+**Usage:**
+```bash
+# Initialize database and system
+./power-monitor.sh init
+
+# Record current power status (check all switches)
+./power-monitor.sh record [--timeout SECONDS] [--verbose]
+
+# Display current status with beautiful tables
+./power-monitor.sh status [--room ROOM] [--verbose]
+
+# Show uptime information
+./power-monitor.sh uptime [--room ROOM] [--all-rooms]
+
+# View outage history and analysis  
+./power-monitor.sh history [--days N] [--room ROOM]
+
+# Room management and statistics
+./power-monitor.sh rooms [list|stats]
+
+# Test system components
+./power-monitor.sh test [config|network|database|power-logic|ui|all]
+
+# Get help for any subcommand
+./power-monitor.sh <subcommand> --help
+```
+
+**Switch Configuration (switches.json):**
+```json
+[
+  {
+    "label": "living-room-lamp",
+    "ip-address": "192.168.1.100",
+    "location": "living-room",
+    "mac-address": "aa:bb:cc:dd:ee:01",
+    "backup-connected": false
+  },
+  {
+    "label": "server-switch",
+    "ip-address": "192.168.1.102",
+    "location": "server-room", 
+    "mac-address": "aa:bb:cc:dd:ee:03",
+    "backup-connected": true
+  }
+]
+```
+
+**Network Validation:**
+- Three-stage validation: ping connectivity + ARP MAC address verification + ARP refresh fallback
+- Prevents false positives from IP conflicts or device replacements
+- Alternative detection for devices that block ping but are reachable via ARP table
+- Real-time progress feedback during network checks with device context (label, IP, room)
+- Handles ARP cache misses and network timeouts gracefully
+- Informative messages: `⚠ fridge (192.168.100.110, vinay-bedroom) not responding to ping, checking ARP table...`
+- Success notifications: `✓ fridge detected via ARP table (ping failed but MAC verified)`
+
+**Database Features:**
+- Historical power status tracking with timestamps
+- Room-level and house-level power statistics
+- Outage detection and duration analysis
+- Switch-level connectivity logs with response times
+- Reliability statistics and uptime calculations
+- Data export capabilities for external analysis
+
+**Automation:**
+```bash
+# Add to crontab for regular monitoring (every 5 minutes)
+*/5 * * * * /path/to/power-monitor.sh record >/dev/null 2>&1
+
+# Daily status summary email
+0 8 * * * /path/to/power-monitor.sh status | mail -s "Daily Power Status" admin@example.com
+```
+
+**Example Status Output:**
+```
+┌──────────────────────────────────────────────────┐
+│                 Power Monitor                    │
+│          House & Room Status [BACKUP]           │
+└──────────────────────────────────────────────────┘
+
+System Status: BACKUP (Main power lost 2h 15m ago)
+
+┌─────────────┬──────────┬────────┬──────────────┬────────┐
+│    Room     │ Switches │ Status │    Uptime    │ Backup │
+├─────────────┼──────────┼────────┼──────────────┼────────┤
+│ Living Room │   2/3    │PARTIAL │     --       │   No   │
+│ Bedroom     │   2/2    │ ONLINE │  2d 15h 23m  │   No   │
+│ Server Room │   1/1    │ ONLINE │  2d 15h 23m  │  Yes   │
+└─────────────┴──────────┴────────┴──────────────┴────────┘
+
+Critical Infrastructure: All backup systems operational
+```
+
+**Future Migration:**
+The database layer is designed for easy migration to time-series databases like InfluxDB or Prometheus for integration with Grafana dashboards and alerting systems.
+
+**Detailed Documentation:**
+See `docs/power-monitor.readme.md` for comprehensive technical documentation, architecture details, and troubleshooting guides.
