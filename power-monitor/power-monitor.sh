@@ -810,7 +810,7 @@ cmd_status() {
         local uptime_minutes
         uptime_minutes=$(echo "$uptime_data" | cut -d'|' -f3)
         if [[ -n "$uptime_minutes" && "$uptime_minutes" != "NULL" ]]; then
-            uptime_info="${uptime_minutes}m"
+            uptime_info=$(format_uptime_minutes "$uptime_minutes")
         fi
     fi
     
@@ -874,7 +874,7 @@ cmd_status() {
                 local uptime_minutes
                 uptime_minutes=$(echo "$room_uptime" | cut -d'|' -f4)
                 if [[ -n "$uptime_minutes" && "$uptime_minutes" != "NULL" ]]; then
-                    uptime_display="${uptime_minutes}m"
+                    uptime_display=$(format_uptime_minutes "$uptime_minutes")
                 fi
             fi
             
@@ -1001,10 +1001,11 @@ cmd_uptime() {
             format_power_status "$current_status"
             echo
             
+            local formatted_uptime=$(format_uptime_minutes "$uptime_minutes")
             if [[ "$current_status" == "ONLINE" ]]; then
-                echo "Power Uptime: ${uptime_minutes}m (since $timestamp)"
+                echo "Power Uptime: $formatted_uptime (since $timestamp)"
             else
-                echo "Power Outage Duration: ${uptime_minutes}m (since $timestamp)"
+                echo "Power Outage Duration: $formatted_uptime (since $timestamp)"
             fi
         else
             show_warning "No uptime data available"
