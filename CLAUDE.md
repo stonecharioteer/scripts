@@ -300,3 +300,87 @@ power-monitor/
 - Dependency validation and graceful degradation
 - Follows existing codebase patterns for consistency
 - Documentation-first approach with detailed README
+
+### Power Monitor Uptime Calculation Fix (Session: 2025-07-12)
+
+Fixed critical issue with uptime calculation showing incorrect short durations instead of actual time since power state changes.
+
+#### Problem Identified
+- **Issue**: Uptime command was showing very short durations (e.g., 0.3m) instead of actual uptime
+- **Root Cause**: `get_current_uptime()` function was calculating time since the latest database record, not since the last power state change
+- **Impact**: Users couldn't see meaningful uptime information, making the monitoring system less useful
+
+#### Technical Analysis
+- **Current Logic**: Used simple query to get latest record timestamp and calculate duration from that point
+- **Problem**: If power had been stable for hours but monitoring ran 5 minutes ago, it showed 5m uptime instead of actual hours
+- **Expected Behavior**: Should calculate time since the last actual power status transition (OFFLINE→ONLINE, ONLINE→BACKUP, etc.)
+
+#### Solution Implemented
+- **Enhanced SQL Logic**: Used window functions with `LAG()` to detect actual status changes
+- **House Uptime**: Finds last time `system_status` changed by comparing current vs previous status
+- **Room Uptime**: Finds last time `room_power_on` changed by comparing current vs previous power state
+- **Status Transition Detection**: Only counts records where status actually differs from previous record
+
+#### Code Changes
+**File**: `lib/database.sh:382-455`
+- Replaced simple timestamp query with complex CTE using window functions
+- Added `LAG()` window function to compare current status with previous record
+- Filters for actual status changes using `WHERE system_status != prev_status OR prev_status IS NULL`
+- Maintains backward compatibility with existing output format
+
+#### Human-Readable Uptime Display Enhancement
+- **Problem**: Uptime was only displayed in minutes (e.g., `1356.8m`)
+- **Solution**: Added `format_uptime_minutes()` helper function in `lib/ui.sh`
+- **Smart Formatting**: Automatically converts minutes to days/hours/minutes format
+  - `45m` for just minutes
+  - `1h 30m` for hours and minutes  
+  - `1d 1h` for days and hours (omits zero minutes)
+  - `22h 39m` for mixed durations
+
+#### Implementation Details
+- **New Function**: `format_uptime_minutes()` in `lib/ui.sh:574-613`
+- **Updated Locations**: All uptime display points in `power-monitor.sh`
+  - Status command room table uptime column
+  - Uptime command house uptime display
+  - Uptime command outage duration display
+- **Decimal Handling**: Converts decimal minutes to integer for clean display
+- **Null Handling**: Gracefully handles NULL/empty values with "--" fallback
+
+#### Results Achieved
+- **Before**: `Power Uptime: 1356.8m (since 2025-07-11 14:49:33)`
+- **After**: `Power Uptime: 22h 39m (since 2025-07-11 14:49:33)`
+- **Accurate Tracking**: Now correctly shows 22+ hours of uptime instead of minutes since last record
+- **User-Friendly**: Human-readable format makes uptime information immediately useful
+
+#### Power Logic Limitations Identified
+During this session, analysis revealed current power detection logic limitations:
+
+**Current Thresholds**:
+- **Main Power**: 50% of non-backup switches must be online for ONLINE status
+- **Backup Power**: 100% of backup switches must be online (any failure = CRITICAL)
+- **Room Power**: 50% threshold applied uniformly to all rooms
+
+**Known Issues**:
+- **Backup Switch Sensitivity**: Single backup switch failure immediately triggers CRITICAL state
+- **Fixed Thresholds**: No per-room or per-switch customization
+- **Network vs Power**: No distinction between temporary network issues vs actual power loss
+- **No Grace Periods**: Immediate state changes without smoothing for intermittent failures
+
+**Future Improvement Areas** (noted for future development):
+- Configurable thresholds per room or switch type
+- Grace periods for intermittent failures  
+- Different criticality levels for backup switches
+- Weighted scoring based on switch importance
+- Time-based averaging to smooth out network hiccups
+- Distinction between different types of failures
+
+#### Status
+- ✅ Fixed uptime calculation to track actual state changes
+- ✅ Added human-readable uptime formatting (days/hours/minutes)
+- ✅ Updated all uptime display locations
+- ✅ Tested and verified correct uptime values
+- ✅ Documented power logic limitations for future improvement
+- ⏳ Power threshold logic limitations noted but deferred (functional enough for current use)
+
+#### Technical Impact
+This fix transforms the power monitor from showing misleading short uptimes to displaying accurate, meaningful uptime information that users can rely on for understanding their power stability patterns.

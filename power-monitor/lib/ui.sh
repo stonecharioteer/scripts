@@ -531,7 +531,7 @@ paginate_output() {
     fi
 }
 
-# Format uptime display
+# Format uptime display (from seconds)
 format_uptime() {
     local uptime_seconds="$1"
     local current_status="${2:-up}"
@@ -569,6 +569,47 @@ format_uptime() {
             style_fallback "down" "red"
         fi
     fi
+}
+
+# Format uptime display (from minutes)
+format_uptime_minutes() {
+    local uptime_minutes="$1"
+    local current_status="${2:-up}"
+    
+    if [[ -z "$uptime_minutes" ]] || [[ "$uptime_minutes" == "NULL" ]] || [[ "$uptime_minutes" == "null" ]]; then
+        echo "--"
+        return
+    fi
+    
+    # Convert decimal minutes to integer
+    local total_minutes=${uptime_minutes%.*}
+    
+    if [[ $total_minutes -eq 0 ]]; then
+        echo "--"
+        return
+    fi
+    
+    local days hours minutes
+    days=$((total_minutes / 1440))  # 1440 minutes in a day
+    hours=$(((total_minutes % 1440) / 60))
+    minutes=$((total_minutes % 60))
+    
+    local uptime_str=""
+    if [[ $days -gt 0 ]]; then
+        uptime_str="${days}d "
+    fi
+    if [[ $hours -gt 0 ]]; then
+        uptime_str="${uptime_str}${hours}h "
+    fi
+    if [[ $minutes -gt 0 ]] || [[ -z "$uptime_str" ]]; then
+        uptime_str="${uptime_str}${minutes}m"
+    fi
+    
+    # Remove trailing space
+    uptime_str=${uptime_str% }
+    
+    # Return plain text without color formatting - let caller handle styling
+    echo "$uptime_str"
 }
 
 # Format percentage with color coding
