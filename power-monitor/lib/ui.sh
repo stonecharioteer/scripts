@@ -232,13 +232,13 @@ create_room_status_table() {
         return 1
     fi
     
-    if check_gum_available; then
-        # Use gum table for beautiful display
-        echo "$room_data" | gum table \
-            --columns "Room,Switches,Status,Uptime,Backup" \
-            --widths "15,10,8,12,8" \
-            --height 10
-    else
+    # Force ASCII table for room status to avoid gum table selection behavior
+    # if check_gum_available; then
+    #     # Use gum table for beautiful display
+    #     echo "$room_data" | gum table \
+    #         --columns "Room,Switches,Status,Uptime,Backup" \
+    #         --widths "15,10,8,12,8"
+    # else
         # Fallback ASCII table
         echo
         printf "%-15s %-10s %-8s %-12s %-8s\n" "Room" "Switches" "Status" "Uptime" "Backup"
@@ -248,19 +248,43 @@ create_room_status_table() {
             [[ -z "$room" ]] && continue
             printf "%-15s %-10s " "$room" "$switches"
             
-            # Format status with colors
+            # Format status with colors (using printf instead of style_fallback to avoid newlines)
             case "$status" in
-                *"ONLINE"*) style_fallback "ONLINE  " "green" ;;
-                *"PARTIAL"*) style_fallback "PARTIAL " "yellow" ;;
-                *"BACKUP"*) style_fallback "BACKUP  " "yellow" ;;
-                *"OFFLINE"*) style_fallback "OFFLINE " "red" ;;
+                *"ONLINE"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "ONLINE"
+                    else
+                        printf "${GREEN}%-8s${NC}" "ONLINE"
+                    fi
+                    ;;
+                *"PARTIAL"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "PARTIAL"
+                    else
+                        printf "${YELLOW}%-8s${NC}" "PARTIAL"
+                    fi
+                    ;;
+                *"BACKUP"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "BACKUP"
+                    else
+                        printf "${YELLOW}%-8s${NC}" "BACKUP"
+                    fi
+                    ;;
+                *"OFFLINE"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "OFFLINE"
+                    else
+                        printf "${RED}%-8s${NC}" "OFFLINE"
+                    fi
+                    ;;
                 *) printf "%-8s" "$status" ;;
             esac
             
             printf " %-12s %-8s\n" "$uptime" "$backup"
         done <<< "$room_data"
         echo
-    fi
+    # fi
 }
 
 # Switch status table
@@ -275,8 +299,7 @@ create_switch_status_table() {
     if check_gum_available; then
         echo "$switch_data" | gum table \
             --columns "Switch,IP Address,Room,Status,Response,Backup" \
-            --widths "12,15,12,8,10,8" \
-            --height 15
+            --widths "12,15,12,8,10,8"
     else
         echo
         printf "%-12s %-15s %-12s %-8s %-10s %-8s\n" "Switch" "IP Address" "Room" "Status" "Response" "Backup"
@@ -287,8 +310,20 @@ create_switch_status_table() {
             printf "%-12s %-15s %-12s " "$label" "$ip_address" "$room"
             
             case "$status" in
-                *"ONLINE"*|*"TRUE"*) style_fallback "ONLINE  " "green" ;;
-                *"OFFLINE"*|*"FALSE"*) style_fallback "OFFLINE " "red" ;;
+                *"ONLINE"*|*"TRUE"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "ONLINE"
+                    else
+                        printf "${GREEN}%-8s${NC}" "ONLINE"
+                    fi
+                    ;;
+                *"OFFLINE"*|*"FALSE"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "OFFLINE"
+                    else
+                        printf "${RED}%-8s${NC}" "OFFLINE"
+                    fi
+                    ;;
                 *) printf "%-8s" "$status" ;;
             esac
             
