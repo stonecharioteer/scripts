@@ -212,6 +212,7 @@ insert_switch_status() {
     local expected_mac="$9"
     local actual_mac="${10:-NULL}"
     local response_time_ms="${11:-NULL}"
+    local detection_method="${12:-0}"
     
     check_database || return 1
     
@@ -235,9 +236,9 @@ insert_switch_status() {
     
     local sql="INSERT INTO switch_status 
                (timestamp, switch_label, ip_address, room_name, backup_connected, 
-                ping_successful, mac_validated, is_authentic, expected_mac, actual_mac, response_time_ms)
+                ping_successful, mac_validated, is_authentic, expected_mac, actual_mac, response_time_ms, detection_method)
                VALUES ('$timestamp', '$switch_label', '$ip_address', '$room_name', $backup_connected,
-                       $ping_successful, $mac_validated, $is_authentic, '$expected_mac', $actual_mac_sql, $response_time_sql);"
+                       $ping_successful, $mac_validated, $is_authentic, '$expected_mac', $actual_mac_sql, $response_time_sql, $detection_method);"
     execute_sql "$sql" "insert switch status: $switch_label"
 }
 

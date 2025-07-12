@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS switch_status (
     expected_mac VARCHAR,
     actual_mac VARCHAR,
     response_time_ms FLOAT,
+    detection_method INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (timestamp, switch_label),
     FOREIGN KEY (switch_label) REFERENCES switches(label),
     FOREIGN KEY (room_name) REFERENCES rooms(room_name)
@@ -69,6 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_room_power_status_room ON room_power_status(room_
 CREATE INDEX IF NOT EXISTS idx_switch_status_timestamp ON switch_status(timestamp);
 CREATE INDEX IF NOT EXISTS idx_switch_status_switch ON switch_status(switch_label);
 CREATE INDEX IF NOT EXISTS idx_switch_status_room ON switch_status(room_name);
+CREATE INDEX IF NOT EXISTS idx_switch_status_detection_method ON switch_status(detection_method);
 CREATE INDEX IF NOT EXISTS idx_switches_backup ON switches(backup_connected);
 CREATE INDEX IF NOT EXISTS idx_switches_room ON switches(room_name);
 
@@ -120,6 +122,7 @@ SELECT
     COALESCE(ss.is_authentic, false) as is_authentic,
     ss.actual_mac,
     ss.response_time_ms,
+    COALESCE(ss.detection_method, 0) as detection_method,
     COALESCE(ss.timestamp, '1970-01-01 00:00:00') as last_check
 FROM switches s
 LEFT JOIN switch_status ss ON s.label = ss.switch_label 

@@ -603,7 +603,7 @@ cmd_record() {
             local status_data=""
             while IFS= read -r status_line && [[ "$status_line" != "---" ]]; do
                 status_data+="$status_line"$'\n'
-                if [[ "$status_line" =~ ^actual_mac: ]]; then
+                if [[ "$status_line" =~ ^detection_method: ]]; then
                     break
                 fi
             done
@@ -612,11 +612,12 @@ cmd_record() {
             ping_successful=$(echo "$status_data" | grep "^ping_successful:" | cut -d: -f2)
             mac_validated=$(echo "$status_data" | grep "^mac_validated:" | cut -d: -f2)
             is_authentic=$(echo "$status_data" | grep "^is_authentic:" | cut -d: -f2)
-            local alternative_method_used
+            local alternative_method_used detection_method
             alternative_method_used=$(echo "$status_data" | grep "^alternative_method_used:" | cut -d: -f2)
             expected_mac="$mac_address"
             actual_mac=$(echo "$status_data" | grep "^actual_mac:" | cut -d: -f2-)
             response_time=$(echo "$status_data" | grep "^response_time:" | cut -d: -f2)
+            detection_method=$(echo "$status_data" | grep "^detection_method:" | cut -d: -f2)
             
             # Add to combined status
             local switch_status
@@ -655,7 +656,7 @@ cmd_record() {
                 
                 insert_switch_status "$timestamp" "$current_switch" "$ip_address" "$room_name" \
                     "$backup_connected" "$ping_successful" "$mac_validated" "$is_authentic" \
-                    "$expected_mac" "${actual_mac:-NULL}" "${response_time:-NULL}"
+                    "$expected_mac" "${actual_mac:-NULL}" "${response_time:-NULL}" "${detection_method:-0}"
             fi
         fi
     done <<< "$switch_results"

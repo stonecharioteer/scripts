@@ -384,3 +384,120 @@ During this session, analysis revealed current power detection logic limitations
 
 #### Technical Impact
 This fix transforms the power monitor from showing misleading short uptimes to displaying accurate, meaningful uptime information that users can rely on for understanding their power stability patterns.
+
+### Power Monitor ARP False Positive Fix and Detection Method Tracking (Session: 2025-07-12)
+
+Complete solution implementation for ARP table false positives with comprehensive detection method tracking for enhanced power monitoring reliability.
+
+#### Problem Analysis and Solution
+- **Issue**: Power monitor incorrectly reports devices as "online" during power outages using alternative ARP detection
+- **Root Cause**: ARP table entries persist for minutes after devices go offline, creating stale entries that cause false positives
+- **Solution Implemented**: Enhanced ARP freshness validation with numeric detection method tracking
+
+#### Root Cause Analysis
+
+**ARP Cache Persistence Behavior**:
+- ARP entries remain in system cache for 60-300+ seconds after devices go offline
+- `arp -n` and `ip neigh show` commands return stale entries without real-time validation
+- Original logic trusted any ARP entry with matching MAC address regardless of freshness
+
+**False Positive Detection Flow**:
+1. **Ping fails** (device actually down due to power outage)
+2. **Check ARP table** - finds stale entry with correct MAC from when device was last reachable
+3. **System reports "detected via ARP"** - FALSE POSITIVE
+4. **Device marked as `is_authentic=true`** - INCORRECT STATUS
+5. **Power calculations use wrong data** - compromised monitoring accuracy
+
+#### Solution Implementation
+
+**Enhanced ARP Freshness Validation with Detection Method Tracking**
+- **ARP State Validation**: Uses `ip neigh show` to check if entries are "REACHABLE", "DELAY", or "STALE"
+- **Fresh Entry Only Logic**: Only accepts ARP entries with REACHABLE/DELAY state as valid detections
+- **Stale Entry Rejection**: Treats stale ARP entries as failed detections (Method 0) to prevent false positives
+- **Numeric Detection Method Tracking**: Records how each device status was determined with numeric codes
+
+**Implementation Details**:
+- **Files Modified**: 
+  - `lib/network.sh` - Enhanced ARP validation functions and detection method constants
+  - `lib/database.sh` - Added detection_method field to switch_status table
+  - `sql/init.sql` - Database schema updates with new field and indexing
+  - `power-monitor.sh` - Updated parsing and recording logic
+- **Database Changes**: Added `detection_method INTEGER` field to `switch_status` table with proper indexing
+
+**Detection Method Constants** (lib/network.sh:18-26):
+- **0 - FAILED**: Device failed all detection methods (includes stale ARP entries)
+- **1 - PING_ONLY**: Ping successful, MAC validation skipped/failed  
+- **2 - PING_MAC**: Ping successful + MAC validation successful (most reliable)
+- **3 - ARP_FRESH**: Ping failed, detected via fresh ARP entry (REACHABLE/DELAY state)
+- **4 - ARP_STALE**: DEPRECATED - stale entries now treated as FAILED (0)
+- **5 - ARP_REFRESH**: Ping failed, detected after ARP cache refresh
+- **6 - ARPING**: Ping failed, detected via arping probe (real-time validation)
+
+#### Enhanced Detection Logic
+
+**New ARP Validation Flow**:
+1. **Ping test** (primary validation) - if successful, use Method 2 (PING_MAC) or Method 1 (PING_ONLY)
+2. **If ping fails**, check ARP table for entry with matching MAC
+3. **Parse ARP state** using `ip neigh show` to determine freshness (REACHABLE/DELAY vs STALE/FAILED)
+4. **Fresh ARP entries** → Device detected as online (Method 3 - ARP_FRESH)
+5. **Stale ARP entries** → Device treated as failed/offline (Method 0 - FAILED)
+6. **ARP refresh attempt** → If successful after refresh, use Method 5 (ARP_REFRESH)
+
+**Key Functions Added/Modified**:
+- `get_arp_entry_info()` - New function to extract MAC, state, and freshness from ARP table
+- `validate_mac_address()` - Enhanced with freshness validation using `POWER_MONITOR_ARP_REQUIRE_FRESH` env var
+- `check_switch_authentic()` - Updated to track and return detection method codes
+- `insert_switch_status()` - Added detection_method parameter to database recording
+
+#### Configuration Options
+**Environment Variables** (lib/network.sh:13-16):
+- `POWER_MONITOR_ARP_REQUIRE_FRESH=true` - Require fresh ARP entries for validation (default: true)
+- `POWER_MONITOR_ARP_FALLBACK_ARPING=false` - Use arping for real-time validation when available (default: false)  
+- `POWER_MONITOR_ARP_DEBUG_LOGGING=false` - Enable detailed ARP debugging (default: false)
+
+#### Database Schema Changes
+**New Field**: `detection_method INTEGER NOT NULL DEFAULT 0` added to `switch_status` table
+**Index Added**: `idx_switch_status_detection_method` for efficient querying by detection method
+**View Updated**: `current_switch_status` view includes detection_method field
+
+#### User Experience Improvements
+**Enhanced Messages**:
+- `⚠ fridge has stale ARP entry (treating as offline)` - Clear indication when stale entries are rejected
+- `✓ fridge detected via fresh ARP entry (ping failed but MAC verified)` - Success with method clarity
+- Debug logging shows ARP state and freshness: `[DEBUG] ARP info for 192.168.1.100: MAC=aa:bb:cc:dd:ee:ff, State=REACHABLE, Fresh=true`
+
+#### Testing Results
+**Verification Commands**:
+```bash
+# Test enhanced detection with debug logging
+POWER_MONITOR_DEBUG=1 ./power-monitor.sh record
+
+# Check detection methods in database  
+duckdb ~/Documents/power.db -c "SELECT switch_label, ping_successful, is_authentic, detection_method FROM switch_status ORDER BY timestamp DESC LIMIT 5;"
+```
+
+**Results Confirmed**:
+- Method 2 (PING_MAC): Working devices show ping success + MAC validation
+- Method 0 (FAILED): Offline devices correctly show failed detection (no false positives from stale ARP)
+- Method 3 (ARP_FRESH): Devices with ping disabled but actually reachable still detected via fresh ARP
+
+#### Status
+- ✅ **Enhanced ARP Freshness Validation**: Implemented with state checking (REACHABLE/DELAY vs STALE)
+- ✅ **Detection Method Tracking**: All device checks now record numeric detection method codes
+- ✅ **Database Schema Updates**: Added detection_method field with proper indexing
+- ✅ **Stale Entry Rejection**: Stale ARP entries treated as failed to prevent false positives
+- ✅ **Configuration Options**: Environment variables for customizing ARP validation behavior
+- ✅ **Enhanced User Messages**: Clear indication of detection method and warnings for stale entries
+- ✅ **Testing Verified**: Confirmed elimination of false positives while maintaining ping-disabled device support
+- ✅ **Documentation Updated**: README and code comments reflect new detection method logic
+
+#### Real-World Impact
+This solution eliminates the critical false positive issue where power monitors incorrectly report devices as online during actual power outages. The comprehensive detection method tracking provides enterprise-grade visibility into network monitoring reliability, enabling:
+
+- **Accurate Power Outage Detection**: No false positives from stale ARP cache entries
+- **Troubleshooting Capability**: Numeric codes show exactly how each device status was determined
+- **Network Configuration Insights**: Distinguish between power issues vs network configuration problems
+- **Maintenance Planning**: Historical detection method data helps identify problematic devices or network segments
+- **Reliability Metrics**: Track detection method reliability over time for system optimization
+
+The enhanced system maintains backward compatibility while providing significantly improved accuracy and diagnostic capabilities for critical infrastructure monitoring.

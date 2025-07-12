@@ -10,6 +10,21 @@ DEFAULT_PING_TIMEOUT=5
 DEFAULT_PING_COUNT=1
 DEFAULT_ARP_TIMEOUT=10
 
+# ARP validation configuration (can be overridden via environment variables)
+# POWER_MONITOR_ARP_REQUIRE_FRESH - require fresh ARP entries for validation (default: true)
+# POWER_MONITOR_ARP_FALLBACK_ARPING - use arping for real-time validation when available (default: false)
+# POWER_MONITOR_ARP_DEBUG_LOGGING - enable detailed ARP debugging (default: false)
+
+# Detection method constants - recorded in switch_status.detection_method field
+# These numeric codes indicate how the device status was determined
+DETECTION_METHOD_FAILED=0           # Device failed all detection methods (includes stale ARP entries)
+DETECTION_METHOD_PING_ONLY=1        # Ping successful, MAC validation skipped/failed
+DETECTION_METHOD_PING_MAC=2         # Ping successful + MAC validation successful
+DETECTION_METHOD_ARP_FRESH=3        # Ping failed, detected via fresh ARP entry (REACHABLE/DELAY)
+DETECTION_METHOD_ARP_STALE=4        # DEPRECATED - stale entries now treated as FAILED (0)
+DETECTION_METHOD_ARP_REFRESH=5      # Ping failed, detected after ARP cache refresh
+DETECTION_METHOD_ARPING=6           # Ping failed, detected via arping probe (real-time validation)
+
 # Colors for output (fallback if not defined)
 RED=${RED:-'\033[0;31m'}
 GREEN=${GREEN:-'\033[0;32m'}
@@ -76,6 +91,68 @@ ping_switch() {
 }
 
 # Get MAC address from ARP table
+# Get ARP entry state and freshness information
+get_arp_entry_info() {
+    local ip_address="$1"
+    local mac_address=""
+    local arp_state=""
+    local is_fresh="false"
+    
+    if [[ -z "$ip_address" ]]; then
+        echo -e "${RED}Error: IP address is required${NC}" >&2
+        return 1
+    fi
+    
+    # Use ip neigh command for state information (modern Linux)
+    if command -v ip >/dev/null 2>&1; then
+        local neigh_output
+        neigh_output=$(ip neigh show "$ip_address" 2>/dev/null || true)
+        
+        if [[ -n "$neigh_output" ]]; then
+            # Extract MAC address and state
+            mac_address=$(echo "$neigh_output" | awk '{print $5}' | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' | head -1 || true)
+            arp_state=$(echo "$neigh_output" | awk '{print $6}' | head -1 || true)
+            
+            # Consider entry fresh if state is REACHABLE or DELAY
+            if [[ "$arp_state" == "REACHABLE" || "$arp_state" == "DELAY" ]]; then
+                is_fresh="true"
+            fi
+        fi
+    fi
+    
+    # Fallback to traditional arp command if ip neigh didn't work
+    if [[ -z "$mac_address" ]] && command -v arp >/dev/null 2>&1; then
+        mac_address=$(arp -n "$ip_address" 2>/dev/null | awk 'NR==1 {print $3}' | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || true)
+        # Traditional arp doesn't provide state info, so we can't determine freshness
+        arp_state="UNKNOWN"
+        is_fresh="unknown"
+    fi
+    
+    # Final fallback to /proc/net/arp
+    if [[ -z "$mac_address" ]] && [[ -f /proc/net/arp ]]; then
+        mac_address=$(awk -v ip="$ip_address" '$1 == ip {print $4}' /proc/net/arp 2>/dev/null | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' | head -1 || true)
+        arp_state="UNKNOWN"
+        is_fresh="unknown"
+    fi
+    
+    if [[ -n "$mac_address" ]]; then
+        # Convert to lowercase for consistency
+        mac_address=$(echo "$mac_address" | tr '[:upper:]' '[:lower:]')
+    fi
+    
+    # Output structured result
+    echo "mac_address:$mac_address"
+    echo "arp_state:$arp_state"
+    echo "is_fresh:$is_fresh"
+    
+    if [[ -n "${POWER_MONITOR_DEBUG:-}" ]]; then
+        echo -e "${GREEN}[DEBUG] ARP info for $ip_address: MAC=$mac_address, State=$arp_state, Fresh=$is_fresh${NC}" >&2
+    fi
+    
+    [[ -n "$mac_address" ]]
+}
+
+# Get MAC address for an IP using ARP table (legacy function for compatibility)
 get_mac_address() {
     local ip_address="$1"
     local timeout="${2:-$DEFAULT_ARP_TIMEOUT}"
@@ -85,32 +162,16 @@ get_mac_address() {
         return 1
     fi
     
-    local mac_address=""
+    local arp_info
+    arp_info=$(get_arp_entry_info "$ip_address")
     
-    # Try multiple methods to get MAC address
-    # Method 1: Traditional arp command
-    if command -v arp >/dev/null 2>&1; then
-        mac_address=$(arp -n "$ip_address" 2>/dev/null | awk 'NR==1 {print $3}' | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || true)
-    fi
-    
-    # Method 2: ip neigh command (modern Linux)
-    if [[ -z "$mac_address" ]] && command -v ip >/dev/null 2>&1; then
-        mac_address=$(ip neigh show "$ip_address" 2>/dev/null | awk '{print $5}' | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' | head -1 || true)
-    fi
-    
-    # Method 3: Parse /proc/net/arp (Linux specific)
-    if [[ -z "$mac_address" ]] && [[ -f /proc/net/arp ]]; then
-        mac_address=$(awk -v ip="$ip_address" '$1 == ip {print $4}' /proc/net/arp 2>/dev/null | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' | head -1 || true)
-    fi
+    local mac_address
+    mac_address=$(echo "$arp_info" | grep "^mac_address:" | cut -d: -f2-)
     
     if [[ -n "$mac_address" ]]; then
-        # Convert to lowercase for consistency
-        mac_address=$(echo "$mac_address" | tr '[:upper:]' '[:lower:]')
-        
         if [[ -n "${POWER_MONITOR_DEBUG:-}" ]]; then
             echo -e "${GREEN}[DEBUG] MAC found for $ip_address: $mac_address${NC}" >&2
         fi
-        
         echo "$mac_address"
         return 0
     else
@@ -121,11 +182,12 @@ get_mac_address() {
     fi
 }
 
-# Validate MAC address against expected value
+# Validate MAC address against expected value with freshness checking
 validate_mac_address() {
     local ip_address="$1"
     local expected_mac="$2"
     local timeout="${3:-$DEFAULT_ARP_TIMEOUT}"
+    local require_fresh="${POWER_MONITOR_ARP_REQUIRE_FRESH:-true}"
     
     if [[ -z "$ip_address" || -z "$expected_mac" ]]; then
         echo -e "${RED}Error: IP address and expected MAC are required${NC}" >&2
@@ -135,15 +197,32 @@ validate_mac_address() {
     # Normalize expected MAC to lowercase
     expected_mac=$(echo "$expected_mac" | tr '[:upper:]' '[:lower:]')
     
-    # Get actual MAC address
-    local actual_mac
-    if actual_mac=$(get_mac_address "$ip_address" "$timeout"); then
+    # Get ARP entry information including freshness
+    local arp_info
+    arp_info=$(get_arp_entry_info "$ip_address")
+    
+    if [[ $? -eq 0 ]]; then
+        local actual_mac arp_state is_fresh
+        actual_mac=$(echo "$arp_info" | grep "^mac_address:" | cut -d: -f2-)
+        arp_state=$(echo "$arp_info" | grep "^arp_state:" | cut -d: -f2-)
+        is_fresh=$(echo "$arp_info" | grep "^is_fresh:" | cut -d: -f2-)
+        
+        # Check if MAC matches
         if [[ "$actual_mac" == "$expected_mac" ]]; then
-            if [[ -n "${POWER_MONITOR_DEBUG:-}" ]]; then
-                echo -e "${GREEN}[DEBUG] MAC validation successful: $ip_address ($actual_mac)${NC}" >&2
+            # MAC matches, now check freshness if required
+            if [[ "$require_fresh" == "true" && "$is_fresh" == "false" ]]; then
+                if [[ -n "${POWER_MONITOR_DEBUG:-}" ]]; then
+                    echo -e "${YELLOW}[DEBUG] MAC validation failed: $ip_address MAC matches but ARP entry is stale (state=$arp_state)${NC}" >&2
+                fi
+                echo "$actual_mac"  # Return actual MAC
+                return 1  # Failed due to stale entry
+            else
+                if [[ -n "${POWER_MONITOR_DEBUG:-}" ]]; then
+                    echo -e "${GREEN}[DEBUG] MAC validation successful: $ip_address ($actual_mac, state=$arp_state, fresh=$is_fresh)${NC}" >&2
+                fi
+                echo "$actual_mac"  # Return actual MAC
+                return 0
             fi
-            echo "$actual_mac"  # Return actual MAC
-            return 0
         else
             if [[ -n "${POWER_MONITOR_DEBUG:-}" ]]; then
                 echo -e "${RED}[DEBUG] MAC mismatch: $ip_address expected=$expected_mac actual=$actual_mac${NC}" >&2
@@ -208,6 +287,7 @@ check_switch_authentic() {
     local alternative_method_used=false
     local response_time=""
     local actual_mac=""
+    local detection_method=$DETECTION_METHOD_FAILED
     
     # Stage 1: Ping test
     if response_time=$(ping_switch "$ip_address" "$ping_timeout"); then
@@ -217,11 +297,14 @@ check_switch_authentic() {
         if actual_mac=$(validate_mac_address "$ip_address" "$expected_mac" "$arp_timeout"); then
             mac_validated=true
             is_authentic=true
+            detection_method=$DETECTION_METHOD_PING_MAC
         else
             # MAC validation failed, but we might have gotten the actual MAC
             if ! actual_mac=$(get_mac_address "$ip_address" "$arp_timeout"); then
                 actual_mac=""
             fi
+            # Ping succeeded but MAC validation failed
+            detection_method=$DETECTION_METHOD_PING_ONLY
         fi
     else
         # Stage 3: Alternative checking methods when ping fails
@@ -243,15 +326,38 @@ check_switch_authentic() {
             mac_validated=true
             is_authentic=true
             
-            # Inform user of successful alternative detection
-            if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
-                echo "INFO: $label ($ip_address, $room) detected via ARP table (ping failed but MAC verified)" >&2
+            # Get ARP info for better messaging
+            local arp_info arp_state is_fresh
+            arp_info=$(get_arp_entry_info "$ip_address")
+            arp_state=$(echo "$arp_info" | grep "^arp_state:" | cut -d: -f2-)
+            is_fresh=$(echo "$arp_info" | grep "^is_fresh:" | cut -d: -f2-)
+            
+            # Only accept fresh ARP entries as valid detections
+            if [[ "$is_fresh" == "true" ]]; then
+                detection_method=$DETECTION_METHOD_ARP_FRESH
+                if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                    echo "INFO: $label ($ip_address, $room) detected via fresh ARP entry (ping failed but MAC verified, state=$arp_state)" >&2
+                else
+                    echo -e "${GREEN}✓ $label ($ip_address, $room) detected via fresh ARP entry (ping failed but MAC verified)${NC}" >&2
+                fi
             else
-                echo -e "${GREEN}✓ $label ($ip_address, $room) detected via ARP table (ping failed but MAC verified)${NC}" >&2
+                # Stale ARP entries are treated as failed - not authentic
+                mac_validated=false
+                is_authentic=false
+                detection_method=$DETECTION_METHOD_FAILED
+                if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                    echo "WARNING: $label ($ip_address, $room) has stale ARP entry (ping failed, MAC matches but state=$arp_state) - treating as offline" >&2
+                else
+                    echo -e "${YELLOW}⚠ $label ($ip_address, $room) has stale ARP entry (treating as offline)${NC}" >&2
+                fi
             fi
             
             if [[ -n "${POWER_MONITOR_DEBUG:-}" ]]; then
-                echo -e "${GREEN}[DEBUG] Alternative check successful: $ip_address found in ARP table with correct MAC${NC}" >&2
+                if [[ "$is_authentic" == "true" ]]; then
+                    echo -e "${GREEN}[DEBUG] Alternative check successful: $ip_address found with fresh ARP entry${NC}" >&2
+                else
+                    echo -e "${YELLOW}[DEBUG] Alternative check failed: $ip_address has stale ARP entry${NC}" >&2
+                fi
             fi
         else
             # Method 2: Try to refresh ARP cache and check again
@@ -269,6 +375,7 @@ check_switch_authentic() {
             if actual_mac=$(validate_mac_address "$ip_address" "$expected_mac" "$arp_timeout"); then
                 mac_validated=true
                 is_authentic=true
+                detection_method=$DETECTION_METHOD_ARP_REFRESH
                 
                 # Inform user of successful detection after ARP refresh
                 if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
@@ -307,6 +414,7 @@ check_switch_authentic() {
     echo "alternative_method_used:$alternative_method_used"
     echo "response_time:$response_time"
     echo "actual_mac:$actual_mac"
+    echo "detection_method:$detection_method"
     
     # Return 0 if authentic, 1 otherwise
     if [[ "$is_authentic" == "true" ]]; then

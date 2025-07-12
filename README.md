@@ -499,12 +499,27 @@ cp power-monitor/config/switches.json.example power-monitor/config/switches.json
 
 **Network Validation:**
 - Three-stage validation: ping connectivity + ARP MAC address verification + ARP refresh fallback
+- Enhanced ARP freshness validation to prevent false positives from stale cache entries
 - Prevents false positives from IP conflicts or device replacements
 - Alternative detection for devices that block ping but are reachable via ARP table
 - Real-time progress feedback during network checks with device context (label, IP, room)
 - Handles ARP cache misses and network timeouts gracefully
 - Informative messages: `⚠ fridge (192.168.100.110, vinay-bedroom) not responding to ping, checking ARP table...`
-- Success notifications: `✓ fridge detected via ARP table (ping failed but MAC verified)`
+- Success notifications: `✓ fridge detected via fresh ARP entry (ping failed but MAC verified)`
+- Stale entry warnings: `⚠ fridge has stale ARP entry (treating as offline)`
+
+**Detection Method Tracking:**
+All device status checks are recorded with numeric detection method codes for analysis and debugging:
+
+- **0 - FAILED**: Device failed all detection methods or has stale ARP entries (truly offline)
+- **1 - PING_ONLY**: Ping successful, MAC validation skipped/failed  
+- **2 - PING_MAC**: Ping successful + MAC validation successful (most reliable)
+- **3 - ARP_FRESH**: Ping failed, detected via fresh ARP entry (REACHABLE/DELAY state)
+- **4 - ARP_STALE**: DEPRECATED - stale entries now treated as FAILED (0)
+- **5 - ARP_REFRESH**: Ping failed, detected after ARP cache refresh
+- **6 - ARPING**: Ping failed, detected via arping probe (real-time validation)
+
+Stale ARP entries are now treated as failures to prevent false positives during power outages. Only fresh ARP entries (REACHABLE/DELAY state) are considered valid alternative detections.
 
 **Database Features:**
 - Historical power status tracking with timestamps
