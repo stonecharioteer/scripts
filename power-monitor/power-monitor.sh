@@ -710,26 +710,52 @@ cmd_record() {
         local room_status
         room_status=$(echo "$power_summary" | sed -n '/room_power_status:/,$p' | tail -n +2)
         
+        # Parse room data section by section
+        local current_room_data=""
+        local in_room_section=false
+        
         while IFS= read -r line; do
             if [[ "$line" == "---" ]]; then
+                # Process completed room section
+                if [[ "$in_room_section" == true && -n "$current_room_data" ]]; then
+                    local room_name switches_online total_switches room_power_on
+                    room_name=$(echo "$current_room_data" | sed -n '/^room_name:/p' | cut -d: -f2)
+                    switches_online=$(echo "$current_room_data" | sed -n '/^switches_online:/p' | cut -d: -f2)
+                    total_switches=$(echo "$current_room_data" | sed -n '/^switches_total:/p' | cut -d: -f2)
+                    room_power_on=$(echo "$current_room_data" | sed -n '/^room_power_on:/p' | cut -d: -f2)
+                    
+                    if [[ -n "$room_name" && -n "$switches_online" ]]; then
+                        insert_room_power_status "$timestamp" "$room_name" "$switches_online" \
+                            "$total_switches" "$room_power_on" "NULL"
+                    fi
+                fi
+                # Reset for next room
+                current_room_data=""
+                in_room_section=false
                 continue
             fi
             
             if [[ "$line" =~ ^room_name: ]]; then
-                local room_name switches_online total_switches room_power_on
-                room_name=$(echo "$line" | cut -d: -f2)
-                
-                # Read room data
-                switches_online=$(sed -n '/^switches_online:/p' <<< "$room_status" | head -1 | cut -d: -f2)
-                total_switches=$(sed -n '/^switches_total:/p' <<< "$room_status" | head -1 | cut -d: -f2)
-                room_power_on=$(sed -n '/^room_power_on:/p' <<< "$room_status" | head -1 | cut -d: -f2)
-                
-                if [[ -n "$room_name" && -n "$switches_online" ]]; then
-                    insert_room_power_status "$timestamp" "$room_name" "$switches_online" \
-                        "$total_switches" "$room_power_on" "NULL"
-                fi
+                in_room_section=true
+                current_room_data="$line"
+            elif [[ "$in_room_section" == true ]]; then
+                current_room_data="$current_room_data"$'\n'"$line"
             fi
         done <<< "$room_status"
+        
+        # Handle last room section (no trailing ---)
+        if [[ "$in_room_section" == true && -n "$current_room_data" ]]; then
+            local room_name switches_online total_switches room_power_on
+            room_name=$(echo "$current_room_data" | sed -n '/^room_name:/p' | cut -d: -f2)
+            switches_online=$(echo "$current_room_data" | sed -n '/^switches_online:/p' | cut -d: -f2)
+            total_switches=$(echo "$current_room_data" | sed -n '/^switches_total:/p' | cut -d: -f2)
+            room_power_on=$(echo "$current_room_data" | sed -n '/^room_power_on:/p' | cut -d: -f2)
+            
+            if [[ -n "$room_name" && -n "$switches_online" ]]; then
+                insert_room_power_status "$timestamp" "$room_name" "$switches_online" \
+                    "$total_switches" "$room_power_on" "NULL"
+            fi
+        fi
     fi
     
     # Show results
