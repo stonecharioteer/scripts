@@ -120,6 +120,7 @@ The [`docs/til/`](docs/til/) folder contains practical development learnings:
 ### Power Monitor
 - **DuckDB not found**: Ensure `~/.local/bin` is in PATH for cron jobs
 - **Network detection**: Some devices require ARP table validation when ping is disabled
+- **False positives fixed**: Recent update (2025-07-13) eliminates room status false positives during outages
 
 ### General
 - **Permission errors**: Ensure scripts have executable permissions (`chmod +x script.sh`)

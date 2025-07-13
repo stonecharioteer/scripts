@@ -640,3 +640,130 @@ The automation improvements enable:
 - **Alert Capability**: Foundation for future alerting and notification systems
 - **System Integration**: Clean logging suitable for integration with monitoring dashboards
 - **Maintenance Efficiency**: Self-documenting setup reduces support overhead
+
+### Power Monitor Room Status Parsing Bug Fix (Session: 2025-07-13)
+
+Critical bug fix in room power status calculation that was causing false positive reports during actual power outages.
+
+#### Problem Identified
+- **Issue**: Status command showed rooms as "ONLINE" when devices were actually failing connectivity tests
+- **Specific Case**: Kitchen showing "1/1 ONLINE" when fridge had `ping_successful = false` and `is_authentic = false`
+- **Impact**: False positive room status reports could mask actual power outages, compromising monitoring reliability
+
+#### Root Cause Analysis
+
+**Data Flow Investigation**:
+1. **Power Logic Calculation**: Correctly calculated `Room kitchen: 0/1 (0%) = false`
+2. **Database Insert**: Incorrectly inserted `kitchen', 1, 1, true` instead of `kitchen', 0, 1, false`
+3. **Status Display**: Showed wrong values from incorrect database records
+
+**Technical Root Cause**:
+- **Parsing Logic Flaw**: Room data parsing used `sed | head -1` on entire room_status variable
+- **Cross-contamination**: When processing "kitchen", parsing picked up "mom-bedroom"'s values (first match)
+- **Global vs Local**: `head -1` always selected first occurrence across all rooms, not current room's data
+
+**Example of Problematic Logic**:
+```bash
+# WRONG: Searches entire room_status and picks first match
+switches_online=$(sed -n '/^switches_online:/p' <<< "$room_status" | head -1 | cut -d: -f2)
+
+# This would pick mom-bedroom's switches_online=1 when processing kitchen
+```
+
+#### Solution Implementation
+
+**Enhanced Section-by-Section Parsing**:
+```bash
+# NEW: Parse each room's data section individually
+local current_room_data=""
+local in_room_section=false
+
+while IFS= read -r line; do
+    if [[ "$line" == "---" ]]; then
+        # Process completed room section
+        if [[ "$in_room_section" == true && -n "$current_room_data" ]]; then
+            # Extract values from current room's data only
+            room_name=$(echo "$current_room_data" | sed -n '/^room_name:/p' | cut -d: -f2)
+            switches_online=$(echo "$current_room_data" | sed -n '/^switches_online:/p' | cut -d: -f2)
+            # ... process room data
+        fi
+        current_room_data=""
+        in_room_section=false
+    elif [[ "$line" =~ ^room_name: ]]; then
+        in_room_section=true
+        current_room_data="$line"
+    elif [[ "$in_room_section" == true ]]; then
+        current_room_data="$current_room_data"$'\n'"$line"
+    fi
+done
+```
+
+**Key Improvements**:
+- **Individual Room Processing**: Each room's data parsed from its own section
+- **Boundary Detection**: Uses `---` separators to identify room sections  
+- **Final Section Handling**: Processes last room even without trailing `---`
+- **Data Isolation**: Prevents cross-contamination between room data
+
+#### Technical Details
+
+**Files Modified**: `power-monitor.sh` lines 709-758
+- **Replaced**: 13 lines of problematic global parsing logic
+- **Added**: 49 lines of robust section-by-section parsing
+- **Maintained**: Backward compatibility with existing power logic functions
+
+**Parsing Flow Enhancement**:
+1. **Section Identification**: Detect `room_name:` to start new room section
+2. **Data Accumulation**: Build `current_room_data` for current room only
+3. **Section Completion**: Process room data when `---` encountered or at end
+4. **Value Extraction**: Parse room-specific values from isolated data section
+
+#### Verification Results
+
+**Before Fix**:
+- Debug: `[DEBUG] Room kitchen: 0/1 (0%) = false` ✓ (power logic correct)
+- Database: `INSERT... kitchen', 1, 1, true` ✗ (parsing wrong)
+- Status: `kitchen 1/1 ONLINE` ✗ (false positive)
+
+**After Fix**:
+- Debug: `[DEBUG] Room kitchen: 0/1 (0%) = false` ✓ (power logic correct)  
+- Database: `INSERT... kitchen', 0, 1, false` ✓ (parsing correct)
+- Status: `kitchen 0/1 OFFLINE` ✓ (accurate representation)
+
+#### Real-World Impact
+
+**Reliability Improvement**:
+- **Eliminated False Positives**: Rooms now correctly show OFFLINE when devices fail
+- **Accurate Power Outage Detection**: No masking of actual connectivity failures
+- **Trustworthy Monitoring**: Status displays match actual device connectivity state
+- **Debugging Enhancement**: Database records now reflect true network conditions
+
+**Monitoring Integrity**:
+- **Critical Infrastructure**: Backup-connected devices show true status during outages
+- **Historical Accuracy**: Database contains correct power state history
+- **Alert Foundation**: Future alerting systems will work with accurate data
+- **Troubleshooting**: Network issues clearly visible in status displays
+
+#### Status
+
+- ✅ **Root Cause Identified**: Global parsing contamination across room sections
+- ✅ **Solution Implemented**: Section-by-section parsing with data isolation
+- ✅ **Testing Verified**: Kitchen correctly shows 0/1 OFFLINE when fridge fails
+- ✅ **Regression Testing**: Other rooms (mom-bedroom, vinay-bedroom) unaffected
+- ✅ **Database Validation**: Current room status view shows accurate data
+- ✅ **Production Ready**: Fix deployed and verified with live device failures
+
+#### Technical Lessons
+
+**Parsing Best Practices**:
+- **Avoid Global Searches**: Use section-specific parsing for structured data
+- **Boundary Detection**: Implement clear section separators and state tracking
+- **Data Isolation**: Ensure each processing unit works with isolated data sets
+- **End-of-Data Handling**: Account for final sections without trailing separators
+
+**Debugging Methodologies**:
+- **Multi-Layer Verification**: Check calculation logic, parsing logic, and database storage separately
+- **Debug Output Analysis**: Use debug logs to identify where data flow breaks
+- **Database Record Inspection**: Verify stored data matches expected calculations
+- **End-to-End Testing**: Test complete flow from network check to status display
+
+This fix ensures the power monitoring system provides accurate, trustworthy status information essential for critical infrastructure monitoring and power outage detection.

@@ -324,6 +324,18 @@ System Status: BACKUP (Main power lost 2h 15m ago)
 Critical Infrastructure: All backup systems operational
 ```
 
+## Recent Bug Fixes
+
+### Room Status Parsing Fix (2025-07-13)
+
+**Issue**: Status command was showing false positives - rooms displayed as "ONLINE" when devices were actually failing connectivity tests.
+
+**Root Cause**: Room data parsing logic used global search (`sed | head -1`) that picked the first match across all rooms instead of parsing each room's data section individually.
+
+**Solution**: Implemented section-by-section parsing that processes each room's data block individually, preventing cross-contamination between room status data.
+
+**Impact**: Eliminated false positive room status reports during actual power outages, ensuring accurate monitoring and reliable alerting foundation.
+
 ## Troubleshooting
 
 ### Common Issues
