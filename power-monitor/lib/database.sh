@@ -212,6 +212,7 @@ insert_switch_status() {
     local expected_mac="$9"
     local actual_mac="${10:-NULL}"
     local response_time_ms="${11:-NULL}"
+    local detection_method="${12:-0}"
     
     check_database || return 1
     
@@ -235,9 +236,9 @@ insert_switch_status() {
     
     local sql="INSERT INTO switch_status 
                (timestamp, switch_label, ip_address, room_name, backup_connected, 
-                ping_successful, mac_validated, is_authentic, expected_mac, actual_mac, response_time_ms)
+                ping_successful, mac_validated, is_authentic, expected_mac, actual_mac, response_time_ms, detection_method)
                VALUES ('$timestamp', '$switch_label', '$ip_address', '$room_name', $backup_connected,
-                       $ping_successful, $mac_validated, $is_authentic, '$expected_mac', $actual_mac_sql, $response_time_sql);"
+                       $ping_successful, $mac_validated, $is_authentic, '$expected_mac', $actual_mac_sql, $response_time_sql, $detection_method);"
     execute_sql "$sql" "insert switch status: $switch_label"
 }
 
@@ -388,30 +389,62 @@ get_current_uptime() {
     local sql
     case "$power_type" in
         "house")
-            # Simplified approach - just get latest status and calculate uptime from latest record
-            sql="SELECT 
-                    system_status,
-                    timestamp as current_since,
-                    ROUND(EXTRACT('epoch' FROM (CURRENT_TIMESTAMP - timestamp::timestamp)) / 60, 1) as uptime_minutes
-                FROM power_status 
-                ORDER BY timestamp DESC 
-                LIMIT 1;"
+            # Find the last time the system status changed
+            sql="WITH status_changes AS (
+                    SELECT 
+                        system_status,
+                        timestamp,
+                        LAG(system_status) OVER (ORDER BY timestamp) as prev_status
+                    FROM power_status 
+                    ORDER BY timestamp DESC
+                ),
+                last_change AS (
+                    SELECT 
+                        system_status,
+                        timestamp as change_timestamp
+                    FROM status_changes 
+                    WHERE system_status != prev_status OR prev_status IS NULL
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                )
+                SELECT 
+                    lc.system_status,
+                    lc.change_timestamp as current_since,
+                    ROUND(EXTRACT('epoch' FROM (CURRENT_TIMESTAMP - lc.change_timestamp::timestamp)) / 60, 1) as uptime_minutes
+                FROM last_change lc;"
             ;;
         "room")
             if [[ -z "$room_name" ]]; then
                 echo -e "${RED}Room name required for room uptime calculation${NC}" >&2
                 return 1
             fi
-            # Simplified approach - just get latest status for the room
-            sql="SELECT 
-                    '$room_name' as room_name,
-                    room_power_on,
-                    timestamp as current_since,
-                    ROUND(EXTRACT('epoch' FROM (CURRENT_TIMESTAMP - timestamp::timestamp)) / 60, 1) as uptime_minutes
-                FROM room_power_status 
-                WHERE room_name = '$room_name'
-                ORDER BY timestamp DESC 
-                LIMIT 1;"
+            # Find the last time the room power status changed
+            sql="WITH room_status_changes AS (
+                    SELECT 
+                        room_name,
+                        room_power_on,
+                        timestamp,
+                        LAG(room_power_on) OVER (ORDER BY timestamp) as prev_power_on
+                    FROM room_power_status 
+                    WHERE room_name = '$room_name'
+                    ORDER BY timestamp DESC
+                ),
+                last_room_change AS (
+                    SELECT 
+                        room_name,
+                        room_power_on,
+                        timestamp as change_timestamp
+                    FROM room_status_changes 
+                    WHERE room_power_on != prev_power_on OR prev_power_on IS NULL
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                )
+                SELECT 
+                    lrc.room_name,
+                    lrc.room_power_on,
+                    lrc.change_timestamp as current_since,
+                    ROUND(EXTRACT('epoch' FROM (CURRENT_TIMESTAMP - lrc.change_timestamp::timestamp)) / 60, 1) as uptime_minutes
+                FROM last_room_change lrc;"
             ;;
         *)
             echo -e "${RED}Invalid power type: $power_type${NC}" >&2

@@ -232,13 +232,13 @@ create_room_status_table() {
         return 1
     fi
     
-    if check_gum_available; then
-        # Use gum table for beautiful display
-        echo "$room_data" | gum table \
-            --columns "Room,Switches,Status,Uptime,Backup" \
-            --widths "15,10,8,12,8" \
-            --height 10
-    else
+    # Force ASCII table for room status to avoid gum table selection behavior
+    # if check_gum_available; then
+    #     # Use gum table for beautiful display
+    #     echo "$room_data" | gum table \
+    #         --columns "Room,Switches,Status,Uptime,Backup" \
+    #         --widths "15,10,8,12,8"
+    # else
         # Fallback ASCII table
         echo
         printf "%-15s %-10s %-8s %-12s %-8s\n" "Room" "Switches" "Status" "Uptime" "Backup"
@@ -248,19 +248,43 @@ create_room_status_table() {
             [[ -z "$room" ]] && continue
             printf "%-15s %-10s " "$room" "$switches"
             
-            # Format status with colors
+            # Format status with colors (using printf instead of style_fallback to avoid newlines)
             case "$status" in
-                *"ONLINE"*) style_fallback "ONLINE  " "green" ;;
-                *"PARTIAL"*) style_fallback "PARTIAL " "yellow" ;;
-                *"BACKUP"*) style_fallback "BACKUP  " "yellow" ;;
-                *"OFFLINE"*) style_fallback "OFFLINE " "red" ;;
+                *"ONLINE"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "ONLINE"
+                    else
+                        printf "${GREEN}%-8s${NC}" "ONLINE"
+                    fi
+                    ;;
+                *"PARTIAL"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "PARTIAL"
+                    else
+                        printf "${YELLOW}%-8s${NC}" "PARTIAL"
+                    fi
+                    ;;
+                *"BACKUP"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "BACKUP"
+                    else
+                        printf "${YELLOW}%-8s${NC}" "BACKUP"
+                    fi
+                    ;;
+                *"OFFLINE"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "OFFLINE"
+                    else
+                        printf "${RED}%-8s${NC}" "OFFLINE"
+                    fi
+                    ;;
                 *) printf "%-8s" "$status" ;;
             esac
             
             printf " %-12s %-8s\n" "$uptime" "$backup"
         done <<< "$room_data"
         echo
-    fi
+    # fi
 }
 
 # Switch status table
@@ -275,8 +299,7 @@ create_switch_status_table() {
     if check_gum_available; then
         echo "$switch_data" | gum table \
             --columns "Switch,IP Address,Room,Status,Response,Backup" \
-            --widths "12,15,12,8,10,8" \
-            --height 15
+            --widths "12,15,12,8,10,8"
     else
         echo
         printf "%-12s %-15s %-12s %-8s %-10s %-8s\n" "Switch" "IP Address" "Room" "Status" "Response" "Backup"
@@ -287,8 +310,20 @@ create_switch_status_table() {
             printf "%-12s %-15s %-12s " "$label" "$ip_address" "$room"
             
             case "$status" in
-                *"ONLINE"*|*"TRUE"*) style_fallback "ONLINE  " "green" ;;
-                *"OFFLINE"*|*"FALSE"*) style_fallback "OFFLINE " "red" ;;
+                *"ONLINE"*|*"TRUE"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "ONLINE"
+                    else
+                        printf "${GREEN}%-8s${NC}" "ONLINE"
+                    fi
+                    ;;
+                *"OFFLINE"*|*"FALSE"*) 
+                    if [[ "${POWER_MONITOR_NON_INTERACTIVE:-false}" == "true" ]]; then
+                        printf "%-8s" "OFFLINE"
+                    else
+                        printf "${RED}%-8s${NC}" "OFFLINE"
+                    fi
+                    ;;
                 *) printf "%-8s" "$status" ;;
             esac
             
@@ -531,7 +566,7 @@ paginate_output() {
     fi
 }
 
-# Format uptime display
+# Format uptime display (from seconds)
 format_uptime() {
     local uptime_seconds="$1"
     local current_status="${2:-up}"
@@ -569,6 +604,47 @@ format_uptime() {
             style_fallback "down" "red"
         fi
     fi
+}
+
+# Format uptime display (from minutes)
+format_uptime_minutes() {
+    local uptime_minutes="$1"
+    local current_status="${2:-up}"
+    
+    if [[ -z "$uptime_minutes" ]] || [[ "$uptime_minutes" == "NULL" ]] || [[ "$uptime_minutes" == "null" ]]; then
+        echo "--"
+        return
+    fi
+    
+    # Convert decimal minutes to integer
+    local total_minutes=${uptime_minutes%.*}
+    
+    if [[ $total_minutes -eq 0 ]]; then
+        echo "--"
+        return
+    fi
+    
+    local days hours minutes
+    days=$((total_minutes / 1440))  # 1440 minutes in a day
+    hours=$(((total_minutes % 1440) / 60))
+    minutes=$((total_minutes % 60))
+    
+    local uptime_str=""
+    if [[ $days -gt 0 ]]; then
+        uptime_str="${days}d "
+    fi
+    if [[ $hours -gt 0 ]]; then
+        uptime_str="${uptime_str}${hours}h "
+    fi
+    if [[ $minutes -gt 0 ]] || [[ -z "$uptime_str" ]]; then
+        uptime_str="${uptime_str}${minutes}m"
+    fi
+    
+    # Remove trailing space
+    uptime_str=${uptime_str% }
+    
+    # Return plain text without color formatting - let caller handle styling
+    echo "$uptime_str"
 }
 
 # Format percentage with color coding

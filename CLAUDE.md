@@ -300,3 +300,470 @@ power-monitor/
 - Dependency validation and graceful degradation
 - Follows existing codebase patterns for consistency
 - Documentation-first approach with detailed README
+
+### Power Monitor Uptime Calculation Fix (Session: 2025-07-12)
+
+Fixed critical issue with uptime calculation showing incorrect short durations instead of actual time since power state changes.
+
+#### Problem Identified
+- **Issue**: Uptime command was showing very short durations (e.g., 0.3m) instead of actual uptime
+- **Root Cause**: `get_current_uptime()` function was calculating time since the latest database record, not since the last power state change
+- **Impact**: Users couldn't see meaningful uptime information, making the monitoring system less useful
+
+#### Technical Analysis
+- **Current Logic**: Used simple query to get latest record timestamp and calculate duration from that point
+- **Problem**: If power had been stable for hours but monitoring ran 5 minutes ago, it showed 5m uptime instead of actual hours
+- **Expected Behavior**: Should calculate time since the last actual power status transition (OFFLINE→ONLINE, ONLINE→BACKUP, etc.)
+
+#### Solution Implemented
+- **Enhanced SQL Logic**: Used window functions with `LAG()` to detect actual status changes
+- **House Uptime**: Finds last time `system_status` changed by comparing current vs previous status
+- **Room Uptime**: Finds last time `room_power_on` changed by comparing current vs previous power state
+- **Status Transition Detection**: Only counts records where status actually differs from previous record
+
+#### Code Changes
+**File**: `lib/database.sh:382-455`
+- Replaced simple timestamp query with complex CTE using window functions
+- Added `LAG()` window function to compare current status with previous record
+- Filters for actual status changes using `WHERE system_status != prev_status OR prev_status IS NULL`
+- Maintains backward compatibility with existing output format
+
+#### Human-Readable Uptime Display Enhancement
+- **Problem**: Uptime was only displayed in minutes (e.g., `1356.8m`)
+- **Solution**: Added `format_uptime_minutes()` helper function in `lib/ui.sh`
+- **Smart Formatting**: Automatically converts minutes to days/hours/minutes format
+  - `45m` for just minutes
+  - `1h 30m` for hours and minutes  
+  - `1d 1h` for days and hours (omits zero minutes)
+  - `22h 39m` for mixed durations
+
+#### Implementation Details
+- **New Function**: `format_uptime_minutes()` in `lib/ui.sh:574-613`
+- **Updated Locations**: All uptime display points in `power-monitor.sh`
+  - Status command room table uptime column
+  - Uptime command house uptime display
+  - Uptime command outage duration display
+- **Decimal Handling**: Converts decimal minutes to integer for clean display
+- **Null Handling**: Gracefully handles NULL/empty values with "--" fallback
+
+#### Results Achieved
+- **Before**: `Power Uptime: 1356.8m (since 2025-07-11 14:49:33)`
+- **After**: `Power Uptime: 22h 39m (since 2025-07-11 14:49:33)`
+- **Accurate Tracking**: Now correctly shows 22+ hours of uptime instead of minutes since last record
+- **User-Friendly**: Human-readable format makes uptime information immediately useful
+
+#### Power Logic Limitations Identified
+During this session, analysis revealed current power detection logic limitations:
+
+**Current Thresholds**:
+- **Main Power**: 50% of non-backup switches must be online for ONLINE status
+- **Backup Power**: 100% of backup switches must be online (any failure = CRITICAL)
+- **Room Power**: 50% threshold applied uniformly to all rooms
+
+**Known Issues**:
+- **Backup Switch Sensitivity**: Single backup switch failure immediately triggers CRITICAL state
+- **Fixed Thresholds**: No per-room or per-switch customization
+- **Network vs Power**: No distinction between temporary network issues vs actual power loss
+- **No Grace Periods**: Immediate state changes without smoothing for intermittent failures
+
+**Future Improvement Areas** (noted for future development):
+- Configurable thresholds per room or switch type
+- Grace periods for intermittent failures  
+- Different criticality levels for backup switches
+- Weighted scoring based on switch importance
+- Time-based averaging to smooth out network hiccups
+- Distinction between different types of failures
+
+#### Status
+- ✅ Fixed uptime calculation to track actual state changes
+- ✅ Added human-readable uptime formatting (days/hours/minutes)
+- ✅ Updated all uptime display locations
+- ✅ Tested and verified correct uptime values
+- ✅ Documented power logic limitations for future improvement
+- ⏳ Power threshold logic limitations noted but deferred (functional enough for current use)
+
+#### Technical Impact
+This fix transforms the power monitor from showing misleading short uptimes to displaying accurate, meaningful uptime information that users can rely on for understanding their power stability patterns.
+
+### Power Monitor ARP False Positive Fix and Detection Method Tracking (Session: 2025-07-12)
+
+Complete solution implementation for ARP table false positives with comprehensive detection method tracking for enhanced power monitoring reliability.
+
+#### Problem Analysis and Solution
+- **Issue**: Power monitor incorrectly reports devices as "online" during power outages using alternative ARP detection
+- **Root Cause**: ARP table entries persist for minutes after devices go offline, creating stale entries that cause false positives
+- **Solution Implemented**: Enhanced ARP freshness validation with numeric detection method tracking
+
+#### Root Cause Analysis
+
+**ARP Cache Persistence Behavior**:
+- ARP entries remain in system cache for 60-300+ seconds after devices go offline
+- `arp -n` and `ip neigh show` commands return stale entries without real-time validation
+- Original logic trusted any ARP entry with matching MAC address regardless of freshness
+
+**False Positive Detection Flow**:
+1. **Ping fails** (device actually down due to power outage)
+2. **Check ARP table** - finds stale entry with correct MAC from when device was last reachable
+3. **System reports "detected via ARP"** - FALSE POSITIVE
+4. **Device marked as `is_authentic=true`** - INCORRECT STATUS
+5. **Power calculations use wrong data** - compromised monitoring accuracy
+
+#### Solution Implementation
+
+**Enhanced ARP Freshness Validation with Detection Method Tracking**
+- **ARP State Validation**: Uses `ip neigh show` to check if entries are "REACHABLE", "DELAY", or "STALE"
+- **Fresh Entry Only Logic**: Only accepts ARP entries with REACHABLE/DELAY state as valid detections
+- **Stale Entry Rejection**: Treats stale ARP entries as failed detections (Method 0) to prevent false positives
+- **Numeric Detection Method Tracking**: Records how each device status was determined with numeric codes
+
+**Implementation Details**:
+- **Files Modified**: 
+  - `lib/network.sh` - Enhanced ARP validation functions and detection method constants
+  - `lib/database.sh` - Added detection_method field to switch_status table
+  - `sql/init.sql` - Database schema updates with new field and indexing
+  - `power-monitor.sh` - Updated parsing and recording logic
+- **Database Changes**: Added `detection_method INTEGER` field to `switch_status` table with proper indexing
+
+**Detection Method Constants** (lib/network.sh:18-26):
+- **0 - FAILED**: Device failed all detection methods (includes stale ARP entries)
+- **1 - PING_ONLY**: Ping successful, MAC validation skipped/failed  
+- **2 - PING_MAC**: Ping successful + MAC validation successful (most reliable)
+- **3 - ARP_FRESH**: Ping failed, detected via fresh ARP entry (REACHABLE/DELAY state)
+- **4 - ARP_STALE**: DEPRECATED - stale entries now treated as FAILED (0)
+- **5 - ARP_REFRESH**: Ping failed, detected after ARP cache refresh
+- **6 - ARPING**: Ping failed, detected via arping probe (real-time validation)
+
+#### Enhanced Detection Logic
+
+**New ARP Validation Flow**:
+1. **Ping test** (primary validation) - if successful, use Method 2 (PING_MAC) or Method 1 (PING_ONLY)
+2. **If ping fails**, check ARP table for entry with matching MAC
+3. **Parse ARP state** using `ip neigh show` to determine freshness (REACHABLE/DELAY vs STALE/FAILED)
+4. **Fresh ARP entries** → Device detected as online (Method 3 - ARP_FRESH)
+5. **Stale ARP entries** → Device treated as failed/offline (Method 0 - FAILED)
+6. **ARP refresh attempt** → If successful after refresh, use Method 5 (ARP_REFRESH)
+
+**Key Functions Added/Modified**:
+- `get_arp_entry_info()` - New function to extract MAC, state, and freshness from ARP table
+- `validate_mac_address()` - Enhanced with freshness validation using `POWER_MONITOR_ARP_REQUIRE_FRESH` env var
+- `check_switch_authentic()` - Updated to track and return detection method codes
+- `insert_switch_status()` - Added detection_method parameter to database recording
+
+#### Configuration Options
+**Environment Variables** (lib/network.sh:13-16):
+- `POWER_MONITOR_ARP_REQUIRE_FRESH=true` - Require fresh ARP entries for validation (default: true)
+- `POWER_MONITOR_ARP_FALLBACK_ARPING=false` - Use arping for real-time validation when available (default: false)  
+- `POWER_MONITOR_ARP_DEBUG_LOGGING=false` - Enable detailed ARP debugging (default: false)
+
+#### Database Schema Changes
+**New Field**: `detection_method INTEGER NOT NULL DEFAULT 0` added to `switch_status` table
+**Index Added**: `idx_switch_status_detection_method` for efficient querying by detection method
+**View Updated**: `current_switch_status` view includes detection_method field
+
+#### User Experience Improvements
+**Enhanced Messages**:
+- `⚠ fridge has stale ARP entry (treating as offline)` - Clear indication when stale entries are rejected
+- `✓ fridge detected via fresh ARP entry (ping failed but MAC verified)` - Success with method clarity
+- Debug logging shows ARP state and freshness: `[DEBUG] ARP info for 192.168.1.100: MAC=aa:bb:cc:dd:ee:ff, State=REACHABLE, Fresh=true`
+
+#### Testing Results
+**Verification Commands**:
+```bash
+# Test enhanced detection with debug logging
+POWER_MONITOR_DEBUG=1 ./power-monitor.sh record
+
+# Check detection methods in database  
+duckdb ~/Documents/power.db -c "SELECT switch_label, ping_successful, is_authentic, detection_method FROM switch_status ORDER BY timestamp DESC LIMIT 5;"
+```
+
+**Results Confirmed**:
+- Method 2 (PING_MAC): Working devices show ping success + MAC validation
+- Method 0 (FAILED): Offline devices correctly show failed detection (no false positives from stale ARP)
+- Method 3 (ARP_FRESH): Devices with ping disabled but actually reachable still detected via fresh ARP
+
+#### Status
+- ✅ **Enhanced ARP Freshness Validation**: Implemented with state checking (REACHABLE/DELAY vs STALE)
+- ✅ **Detection Method Tracking**: All device checks now record numeric detection method codes
+- ✅ **Database Schema Updates**: Added detection_method field with proper indexing
+- ✅ **Stale Entry Rejection**: Stale ARP entries treated as failed to prevent false positives
+- ✅ **Configuration Options**: Environment variables for customizing ARP validation behavior
+- ✅ **Enhanced User Messages**: Clear indication of detection method and warnings for stale entries
+- ✅ **Testing Verified**: Confirmed elimination of false positives while maintaining ping-disabled device support
+- ✅ **Documentation Updated**: README and code comments reflect new detection method logic
+
+#### Real-World Impact
+This solution eliminates the critical false positive issue where power monitors incorrectly report devices as online during actual power outages. The comprehensive detection method tracking provides enterprise-grade visibility into network monitoring reliability, enabling:
+
+- **Accurate Power Outage Detection**: No false positives from stale ARP cache entries
+- **Troubleshooting Capability**: Numeric codes show exactly how each device status was determined
+- **Network Configuration Insights**: Distinguish between power issues vs network configuration problems
+- **Maintenance Planning**: Historical detection method data helps identify problematic devices or network segments
+- **Reliability Metrics**: Track detection method reliability over time for system optimization
+
+The enhanced system maintains backward compatibility while providing significantly improved accuracy and diagnostic capabilities for critical infrastructure monitoring.
+
+### Power Monitor Crontab Automation and Documentation Updates (Session: 2025-07-13)
+
+Enhanced power monitor with proper crontab automation setup, documentation improvements, and troubleshooting for common deployment issues.
+
+#### Crontab Automation Implementation
+
+**Problem Identified**: Power monitor cron jobs were failing silently with "duckdb is not installed" errors despite working when run manually.
+
+**Root Cause Analysis**:
+- **Minimal Environment**: Cron runs with minimal PATH that doesn't include user-installed tools
+- **duckdb Location**: Installed in `~/.local/bin/duckdb` but not accessible to cron
+- **Cascading Failures**: Database access errors were actually PATH-related, not permission issues
+- **Silent Failures**: No logging made troubleshooting difficult
+
+#### Solution Implementation
+
+**Comprehensive Crontab Configuration**:
+```bash
+# Essential PATH setup for cron environment
+PATH=/home/username/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Automated monitoring with proper locking and logging
+*/5 * * * * /usr/bin/flock -n /tmp/power-monitor.lock /path/to/power-monitor.sh record 2>&1 | logger -t power-monitor
+```
+
+**Key Components**:
+1. **PATH Environment Variable**: Explicit PATH setup to include user binary locations
+2. **File Locking with flock**: Prevents multiple instances using non-blocking lock (`-n` flag)
+3. **System Logging with logger**: Automatic log rotation via syslog instead of local files
+4. **Error Capture**: `2>&1` captures both stdout and stderr for complete debugging
+
+#### Troubleshooting Tools and Techniques
+
+**Log Monitoring Commands**:
+```bash
+# Real-time monitoring
+journalctl -t power-monitor -f
+
+# Historical analysis
+journalctl -t power-monitor --since "1 hour ago"
+
+# Database verification
+duckdb ~/Documents/power.db -c "SELECT COUNT(*) FROM power_status WHERE DATE(timestamp) = '$(date +%Y-%m-%d)';"
+```
+
+**Common Issues Identified**:
+- **"duckdb is not installed"**: PATH not set in crontab environment
+- **"Cannot access database"**: Usually follows from duckdb not found
+- **Multiple instances**: Solved with flock file locking
+- **Silent failures**: Resolved with logger integration
+- **Gap in monitoring**: Database records missing during cron failures
+
+#### Documentation Enhancements
+
+**README.md Improvements**:
+- **Comprehensive Crontab Section**: Added detailed automation setup with examples
+- **PATH Gotcha Documentation**: Explicit warning about cron environment limitations
+- **flock Usage Guidelines**: Multiple instance prevention with examples
+- **logger Best Practices**: System logging vs local file approaches
+- **Troubleshooting Section**: Step-by-step debugging for common issues
+- **Testing Commands**: Verification procedures for cron setup
+
+**File Organization**:
+- **Moved Documentation**: `docs/power-monitor.readme.md` → `power-monitor/README.md`
+- **Updated Root README**: Fixed broken link to power-monitor documentation
+- **Proper Linking**: Created relative link structure for better navigation
+
+#### Database Management
+
+**Room Configuration Fix**:
+- **Issue**: Fridge switch incorrectly assigned to "vinay-bedroom" instead of "kitchen"
+- **Challenge**: Foreign key constraints preventing simple UPDATE operations
+- **Solution**: Added kitchen room first, then updated switch and related status records
+- **Outcome**: Proper room assignment with maintained referential integrity
+
+#### Advanced Logging Patterns
+
+**Alternative Logging Approaches**:
+```bash
+# Option 1: System syslog (recommended)
+*/5 * * * * command 2>&1 | logger -t power-monitor
+
+# Option 2: Custom log with rotation
+*/5 * * * * command >> ~/.local/log/power-monitor.log 2>&1
+
+# Option 3: Silent operation (not recommended)
+*/5 * * * * command >/dev/null 2>&1
+```
+
+**Benefits of logger Approach**:
+- **Automatic Rotation**: System handles log rotation via logrotate
+- **Centralized Logging**: Integration with system logging infrastructure
+- **Real-time Monitoring**: `journalctl -f` for live log tailing
+- **Search Capabilities**: Built-in filtering and date-based searching
+- **No Maintenance**: No manual log file management required
+
+#### Deployment Best Practices
+
+**Testing Methodology**:
+1. **Manual Execution**: Test exact cron command manually first
+2. **Database Verification**: Check for new records after test runs
+3. **Log Monitoring**: Watch logs during initial deployment
+4. **Gap Detection**: Monitor for missing time periods in data
+5. **Performance Validation**: Ensure monitoring doesn't impact system performance
+
+**Configuration Validation**:
+- **Dependency Checking**: Verify all required tools available in cron PATH
+- **Permission Verification**: Ensure database and log file accessibility
+- **Network Testing**: Validate switch connectivity from cron environment
+- **Timing Verification**: Confirm monitoring frequency meets requirements
+
+#### Status and Outcomes
+
+**Deployment Results**:
+- ✅ **Reliable Automation**: Cron jobs now run successfully every 5 minutes
+- ✅ **Complete Logging**: Full visibility into monitoring operations and failures
+- ✅ **No More Silent Failures**: All errors captured and accessible via journalctl
+- ✅ **Prevented Race Conditions**: flock eliminates overlapping execution issues
+- ✅ **Comprehensive Documentation**: Complete setup and troubleshooting guide
+- ✅ **Database Consistency**: Proper room assignments and foreign key integrity
+- ✅ **Monitoring Verification**: Tools and commands for ongoing system health checks
+
+**Key Learnings**:
+- **Environment Differences**: Cron vs shell environments require explicit PATH management
+- **Debugging Importance**: Proper logging essential for automated system troubleshooting
+- **Lock File Benefits**: Simple file locking prevents complex race condition issues
+- **Documentation Value**: Comprehensive guides prevent repeated troubleshooting efforts
+- **System Integration**: logger command provides powerful logging without complexity
+
+**Real-World Impact**:
+This implementation transforms the power monitor from a manually-run tool to a fully automated monitoring system suitable for production deployment. The comprehensive documentation and troubleshooting guides enable reliable setup and maintenance across different environments and users.
+
+The automation improvements enable:
+- **Continuous Monitoring**: 24/7 power status tracking without manual intervention
+- **Historical Analysis**: Long-term data collection for trend analysis and capacity planning
+- **Alert Capability**: Foundation for future alerting and notification systems
+- **System Integration**: Clean logging suitable for integration with monitoring dashboards
+- **Maintenance Efficiency**: Self-documenting setup reduces support overhead
+
+### Power Monitor Room Status Parsing Bug Fix (Session: 2025-07-13)
+
+Critical bug fix in room power status calculation that was causing false positive reports during actual power outages.
+
+#### Problem Identified
+- **Issue**: Status command showed rooms as "ONLINE" when devices were actually failing connectivity tests
+- **Specific Case**: Kitchen showing "1/1 ONLINE" when fridge had `ping_successful = false` and `is_authentic = false`
+- **Impact**: False positive room status reports could mask actual power outages, compromising monitoring reliability
+
+#### Root Cause Analysis
+
+**Data Flow Investigation**:
+1. **Power Logic Calculation**: Correctly calculated `Room kitchen: 0/1 (0%) = false`
+2. **Database Insert**: Incorrectly inserted `kitchen', 1, 1, true` instead of `kitchen', 0, 1, false`
+3. **Status Display**: Showed wrong values from incorrect database records
+
+**Technical Root Cause**:
+- **Parsing Logic Flaw**: Room data parsing used `sed | head -1` on entire room_status variable
+- **Cross-contamination**: When processing "kitchen", parsing picked up "mom-bedroom"'s values (first match)
+- **Global vs Local**: `head -1` always selected first occurrence across all rooms, not current room's data
+
+**Example of Problematic Logic**:
+```bash
+# WRONG: Searches entire room_status and picks first match
+switches_online=$(sed -n '/^switches_online:/p' <<< "$room_status" | head -1 | cut -d: -f2)
+
+# This would pick mom-bedroom's switches_online=1 when processing kitchen
+```
+
+#### Solution Implementation
+
+**Enhanced Section-by-Section Parsing**:
+```bash
+# NEW: Parse each room's data section individually
+local current_room_data=""
+local in_room_section=false
+
+while IFS= read -r line; do
+    if [[ "$line" == "---" ]]; then
+        # Process completed room section
+        if [[ "$in_room_section" == true && -n "$current_room_data" ]]; then
+            # Extract values from current room's data only
+            room_name=$(echo "$current_room_data" | sed -n '/^room_name:/p' | cut -d: -f2)
+            switches_online=$(echo "$current_room_data" | sed -n '/^switches_online:/p' | cut -d: -f2)
+            # ... process room data
+        fi
+        current_room_data=""
+        in_room_section=false
+    elif [[ "$line" =~ ^room_name: ]]; then
+        in_room_section=true
+        current_room_data="$line"
+    elif [[ "$in_room_section" == true ]]; then
+        current_room_data="$current_room_data"$'\n'"$line"
+    fi
+done
+```
+
+**Key Improvements**:
+- **Individual Room Processing**: Each room's data parsed from its own section
+- **Boundary Detection**: Uses `---` separators to identify room sections  
+- **Final Section Handling**: Processes last room even without trailing `---`
+- **Data Isolation**: Prevents cross-contamination between room data
+
+#### Technical Details
+
+**Files Modified**: `power-monitor.sh` lines 709-758
+- **Replaced**: 13 lines of problematic global parsing logic
+- **Added**: 49 lines of robust section-by-section parsing
+- **Maintained**: Backward compatibility with existing power logic functions
+
+**Parsing Flow Enhancement**:
+1. **Section Identification**: Detect `room_name:` to start new room section
+2. **Data Accumulation**: Build `current_room_data` for current room only
+3. **Section Completion**: Process room data when `---` encountered or at end
+4. **Value Extraction**: Parse room-specific values from isolated data section
+
+#### Verification Results
+
+**Before Fix**:
+- Debug: `[DEBUG] Room kitchen: 0/1 (0%) = false` ✓ (power logic correct)
+- Database: `INSERT... kitchen', 1, 1, true` ✗ (parsing wrong)
+- Status: `kitchen 1/1 ONLINE` ✗ (false positive)
+
+**After Fix**:
+- Debug: `[DEBUG] Room kitchen: 0/1 (0%) = false` ✓ (power logic correct)  
+- Database: `INSERT... kitchen', 0, 1, false` ✓ (parsing correct)
+- Status: `kitchen 0/1 OFFLINE` ✓ (accurate representation)
+
+#### Real-World Impact
+
+**Reliability Improvement**:
+- **Eliminated False Positives**: Rooms now correctly show OFFLINE when devices fail
+- **Accurate Power Outage Detection**: No masking of actual connectivity failures
+- **Trustworthy Monitoring**: Status displays match actual device connectivity state
+- **Debugging Enhancement**: Database records now reflect true network conditions
+
+**Monitoring Integrity**:
+- **Critical Infrastructure**: Backup-connected devices show true status during outages
+- **Historical Accuracy**: Database contains correct power state history
+- **Alert Foundation**: Future alerting systems will work with accurate data
+- **Troubleshooting**: Network issues clearly visible in status displays
+
+#### Status
+
+- ✅ **Root Cause Identified**: Global parsing contamination across room sections
+- ✅ **Solution Implemented**: Section-by-section parsing with data isolation
+- ✅ **Testing Verified**: Kitchen correctly shows 0/1 OFFLINE when fridge fails
+- ✅ **Regression Testing**: Other rooms (mom-bedroom, vinay-bedroom) unaffected
+- ✅ **Database Validation**: Current room status view shows accurate data
+- ✅ **Production Ready**: Fix deployed and verified with live device failures
+
+#### Technical Lessons
+
+**Parsing Best Practices**:
+- **Avoid Global Searches**: Use section-specific parsing for structured data
+- **Boundary Detection**: Implement clear section separators and state tracking
+- **Data Isolation**: Ensure each processing unit works with isolated data sets
+- **End-of-Data Handling**: Account for final sections without trailing separators
+
+**Debugging Methodologies**:
+- **Multi-Layer Verification**: Check calculation logic, parsing logic, and database storage separately
+- **Debug Output Analysis**: Use debug logs to identify where data flow breaks
+- **Database Record Inspection**: Verify stored data matches expected calculations
+- **End-to-End Testing**: Test complete flow from network check to status display
+
+This fix ensures the power monitoring system provides accurate, trustworthy status information essential for critical infrastructure monitoring and power outage detection.

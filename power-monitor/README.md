@@ -478,15 +478,72 @@ cp config/switches.json.example config/switches.json
 ```
 
 ### Automation Setup
+
+#### Crontab Configuration
+
+For automated monitoring, set up a cron job to run the power monitor every few minutes:
+
 ```bash
-# Add to crontab for regular monitoring
+# Edit your crontab
 crontab -e
 
-# Record status every 5 minutes
-*/5 * * * * /path/to/power-monitor.sh record >/dev/null 2>&1
+# Add PATH and monitoring job
+PATH=/home/username/.local/bin:/usr/local/bin:/usr/bin:/bin
+*/5 * * * * /usr/bin/flock -n /tmp/power-monitor.lock /path/to/power-monitor.sh record 2>&1 | logger -t power-monitor
+```
 
-# Daily status email (optional)
-0 8 * * * /path/to/power-monitor.sh status | mail -s "Daily Power Status" admin@example.com
+**Important Configuration Details:**
+
+1. **PATH Environment Variable**: Cron runs with a minimal environment. You MUST set the PATH to include where `duckdb` is installed (commonly `~/.local/bin`). Without this, you'll see "duckdb is not installed" errors even though it works when run manually.
+
+2. **File Locking with flock**: Use `flock` to prevent multiple instances from running simultaneously. The `-n` flag makes it non-blocking - if another instance is running, the new one exits immediately without conflicts.
+
+3. **Logging with logger**: Use the `logger` command to send output to syslog instead of accumulating in local files. This provides automatic log rotation and centralized logging.
+
+**Monitoring Cron Job Status:**
+
+```bash
+# View real-time power monitor logs
+journalctl -t power-monitor -f
+
+# Check recent logs
+journalctl -t power-monitor --since "1 hour ago"
+
+# Check if cron jobs are running
+grep power-monitor /var/log/syslog | tail -5
+```
+
+**Common Crontab Issues:**
+
+- **"duckdb is not installed"**: Add full PATH to crontab header
+- **Database access errors**: Usually follows from duckdb not found due to PATH issues
+- **Multiple instances**: Use flock to prevent overlapping runs
+- **Silent failures**: Use logger to capture and monitor output
+
+**Alternative Logging Options:**
+
+```bash
+# Option 1: Direct to syslog (recommended)
+*/5 * * * * /usr/bin/flock -n /tmp/power-monitor.lock /path/to/power-monitor.sh record 2>&1 | logger -t power-monitor
+
+# Option 2: Custom log file with rotation
+*/5 * * * * /usr/bin/flock -n /tmp/power-monitor.lock /path/to/power-monitor.sh record >> ~/.local/log/power-monitor.log 2>&1
+
+# Option 3: Silent operation (not recommended for troubleshooting)
+*/5 * * * * /usr/bin/flock -n /tmp/power-monitor.lock /path/to/power-monitor.sh record >/dev/null 2>&1
+```
+
+**Testing Your Cron Setup:**
+
+```bash
+# Test the exact command that cron will run
+/usr/bin/flock -n /tmp/power-monitor.lock /path/to/power-monitor.sh record
+
+# Verify database is being updated
+duckdb ~/Documents/power.db -c "SELECT COUNT(*) FROM power_status WHERE DATE(timestamp) = '$(date +%Y-%m-%d)';"
+
+# Check for errors in the last few runs
+journalctl -t power-monitor --since "30 minutes ago"
 ```
 
 ## Troubleshooting
