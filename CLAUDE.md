@@ -501,3 +501,142 @@ This solution eliminates the critical false positive issue where power monitors 
 - **Reliability Metrics**: Track detection method reliability over time for system optimization
 
 The enhanced system maintains backward compatibility while providing significantly improved accuracy and diagnostic capabilities for critical infrastructure monitoring.
+
+### Power Monitor Crontab Automation and Documentation Updates (Session: 2025-07-13)
+
+Enhanced power monitor with proper crontab automation setup, documentation improvements, and troubleshooting for common deployment issues.
+
+#### Crontab Automation Implementation
+
+**Problem Identified**: Power monitor cron jobs were failing silently with "duckdb is not installed" errors despite working when run manually.
+
+**Root Cause Analysis**:
+- **Minimal Environment**: Cron runs with minimal PATH that doesn't include user-installed tools
+- **duckdb Location**: Installed in `~/.local/bin/duckdb` but not accessible to cron
+- **Cascading Failures**: Database access errors were actually PATH-related, not permission issues
+- **Silent Failures**: No logging made troubleshooting difficult
+
+#### Solution Implementation
+
+**Comprehensive Crontab Configuration**:
+```bash
+# Essential PATH setup for cron environment
+PATH=/home/username/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Automated monitoring with proper locking and logging
+*/5 * * * * /usr/bin/flock -n /tmp/power-monitor.lock /path/to/power-monitor.sh record 2>&1 | logger -t power-monitor
+```
+
+**Key Components**:
+1. **PATH Environment Variable**: Explicit PATH setup to include user binary locations
+2. **File Locking with flock**: Prevents multiple instances using non-blocking lock (`-n` flag)
+3. **System Logging with logger**: Automatic log rotation via syslog instead of local files
+4. **Error Capture**: `2>&1` captures both stdout and stderr for complete debugging
+
+#### Troubleshooting Tools and Techniques
+
+**Log Monitoring Commands**:
+```bash
+# Real-time monitoring
+journalctl -t power-monitor -f
+
+# Historical analysis
+journalctl -t power-monitor --since "1 hour ago"
+
+# Database verification
+duckdb ~/Documents/power.db -c "SELECT COUNT(*) FROM power_status WHERE DATE(timestamp) = '$(date +%Y-%m-%d)';"
+```
+
+**Common Issues Identified**:
+- **"duckdb is not installed"**: PATH not set in crontab environment
+- **"Cannot access database"**: Usually follows from duckdb not found
+- **Multiple instances**: Solved with flock file locking
+- **Silent failures**: Resolved with logger integration
+- **Gap in monitoring**: Database records missing during cron failures
+
+#### Documentation Enhancements
+
+**README.md Improvements**:
+- **Comprehensive Crontab Section**: Added detailed automation setup with examples
+- **PATH Gotcha Documentation**: Explicit warning about cron environment limitations
+- **flock Usage Guidelines**: Multiple instance prevention with examples
+- **logger Best Practices**: System logging vs local file approaches
+- **Troubleshooting Section**: Step-by-step debugging for common issues
+- **Testing Commands**: Verification procedures for cron setup
+
+**File Organization**:
+- **Moved Documentation**: `docs/power-monitor.readme.md` → `power-monitor/README.md`
+- **Updated Root README**: Fixed broken link to power-monitor documentation
+- **Proper Linking**: Created relative link structure for better navigation
+
+#### Database Management
+
+**Room Configuration Fix**:
+- **Issue**: Fridge switch incorrectly assigned to "vinay-bedroom" instead of "kitchen"
+- **Challenge**: Foreign key constraints preventing simple UPDATE operations
+- **Solution**: Added kitchen room first, then updated switch and related status records
+- **Outcome**: Proper room assignment with maintained referential integrity
+
+#### Advanced Logging Patterns
+
+**Alternative Logging Approaches**:
+```bash
+# Option 1: System syslog (recommended)
+*/5 * * * * command 2>&1 | logger -t power-monitor
+
+# Option 2: Custom log with rotation
+*/5 * * * * command >> ~/.local/log/power-monitor.log 2>&1
+
+# Option 3: Silent operation (not recommended)
+*/5 * * * * command >/dev/null 2>&1
+```
+
+**Benefits of logger Approach**:
+- **Automatic Rotation**: System handles log rotation via logrotate
+- **Centralized Logging**: Integration with system logging infrastructure
+- **Real-time Monitoring**: `journalctl -f` for live log tailing
+- **Search Capabilities**: Built-in filtering and date-based searching
+- **No Maintenance**: No manual log file management required
+
+#### Deployment Best Practices
+
+**Testing Methodology**:
+1. **Manual Execution**: Test exact cron command manually first
+2. **Database Verification**: Check for new records after test runs
+3. **Log Monitoring**: Watch logs during initial deployment
+4. **Gap Detection**: Monitor for missing time periods in data
+5. **Performance Validation**: Ensure monitoring doesn't impact system performance
+
+**Configuration Validation**:
+- **Dependency Checking**: Verify all required tools available in cron PATH
+- **Permission Verification**: Ensure database and log file accessibility
+- **Network Testing**: Validate switch connectivity from cron environment
+- **Timing Verification**: Confirm monitoring frequency meets requirements
+
+#### Status and Outcomes
+
+**Deployment Results**:
+- ✅ **Reliable Automation**: Cron jobs now run successfully every 5 minutes
+- ✅ **Complete Logging**: Full visibility into monitoring operations and failures
+- ✅ **No More Silent Failures**: All errors captured and accessible via journalctl
+- ✅ **Prevented Race Conditions**: flock eliminates overlapping execution issues
+- ✅ **Comprehensive Documentation**: Complete setup and troubleshooting guide
+- ✅ **Database Consistency**: Proper room assignments and foreign key integrity
+- ✅ **Monitoring Verification**: Tools and commands for ongoing system health checks
+
+**Key Learnings**:
+- **Environment Differences**: Cron vs shell environments require explicit PATH management
+- **Debugging Importance**: Proper logging essential for automated system troubleshooting
+- **Lock File Benefits**: Simple file locking prevents complex race condition issues
+- **Documentation Value**: Comprehensive guides prevent repeated troubleshooting efforts
+- **System Integration**: logger command provides powerful logging without complexity
+
+**Real-World Impact**:
+This implementation transforms the power monitor from a manually-run tool to a fully automated monitoring system suitable for production deployment. The comprehensive documentation and troubleshooting guides enable reliable setup and maintenance across different environments and users.
+
+The automation improvements enable:
+- **Continuous Monitoring**: 24/7 power status tracking without manual intervention
+- **Historical Analysis**: Long-term data collection for trend analysis and capacity planning
+- **Alert Capability**: Foundation for future alerting and notification systems
+- **System Integration**: Clean logging suitable for integration with monitoring dashboards
+- **Maintenance Efficiency**: Self-documenting setup reduces support overhead

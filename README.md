@@ -562,4 +562,4 @@ Critical Infrastructure: All backup systems operational
 The database layer is designed for easy migration to time-series databases like InfluxDB or Prometheus for integration with Grafana dashboards and alerting systems.
 
 **Detailed Documentation:**
-See `docs/power-monitor.readme.md` for comprehensive technical documentation, architecture details, and troubleshooting guides.
+See [power-monitor/README.md](power-monitor/README.md) for comprehensive technical documentation, architecture details, and troubleshooting guides.
