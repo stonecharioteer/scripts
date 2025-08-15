@@ -20,6 +20,9 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ### Infrastructure Monitoring
 - **[power-monitor](docs/power-monitor.md)** - House and room-level power monitoring with backup-aware logic and MAC validation
 
+### System Configuration
+- **[set-locale.sh](docs/set-locale.md)** - Configure en_US.UTF-8 locale with cleanup options for unused locales
+
 ## 🎯 Quick Start Examples
 
 ```bash
@@ -40,6 +43,12 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 
 # Monitor house power status
 ./power-monitor/power-monitor.sh status
+
+# Configure system locale to en_US.UTF-8
+./set-locale.sh
+
+# Clean up unused locales to save space
+./set-locale.sh --cleanup
 ```
 
 ## 📋 Requirements by Script
@@ -52,6 +61,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | gi-select | `gum`, gitignore repository |
 | highlight-manager | `duckdb`, `gum`, `jq`, `python3` |
 | power-monitor | `duckdb`, `ping`, `arp`, `jq`, `gum` |
+| set-locale | `locale-gen`, `sudo` access |
 
 ## 🏗️ Installation
 
@@ -92,6 +102,7 @@ docs/
 ├── gi-select.md            # Interactive gitignore generation
 ├── highlight-manager.md     # Kindle highlights management
 ├── power-monitor.md        # Power monitoring system
+├── set-locale.md           # System locale configuration
 └── til/                    # Today I Learned entries
     ├── README.md           # TIL index
     └── 2025-07-13.md       # Crontab, flock, logger learnings
