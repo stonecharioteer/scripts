@@ -62,6 +62,21 @@ Complete power monitoring system for house/room-level status tracking:
 **Power States**: ONLINE (green), BACKUP (yellow), CRITICAL/OFFLINE (red)
 **Monitoring**: Real-time status, historical analysis, automated cron deployment
 
+### Locale Configuration Script (2025-08-15)
+Created set-locale.sh for comprehensive locale management:
+
+**Core Features**:
+- **Automatic Setup**: Generates and configures en_US.UTF-8 locale with all LC_* variables
+- **System Integration**: Updates /etc/default/locale and current session without restart
+- **Cleanup Option**: Removes unused locales (--cleanup) keeping only en_US.UTF-8 and C/POSIX
+- **Verification**: Complete locale status checking (--verify) with detailed output
+
+**Key Components**:
+- **Safety First**: Backup creation before cleanup, confirmation prompts for destructive actions
+- **Cross-platform**: Works with different locale-gen implementations and system configurations
+- **Immediate Effect**: Updates current session environment variables for instant usage
+- **Space Optimization**: Cleans both locale.gen and locale archive to minimize disk usage
+
 
 
 
