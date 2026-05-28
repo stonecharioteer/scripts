@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import re
 import shutil
 import sys
@@ -99,9 +100,16 @@ class Skip:
 
 
 @dataclass(frozen=True)
+class Delete:
+    source: Path
+    reason: str
+
+
+@dataclass(frozen=True)
 class Plan:
     discovered: int
     destinations: list[Destination]
+    deletes: list[Delete]
     skips: list[Skip]
     warnings: list[str]
 
@@ -397,7 +405,7 @@ def iter_source_files(source_root: Path, excluded_roots: list[Path], excluded_fi
     return files
 
 
-def plan_library(rel_paths: list[Path], include_podcasts: bool) -> Plan:
+def plan_library(rel_paths: list[Path], include_podcasts: bool, source_root: Optional[Path] = None) -> Plan:
     destinations: list[Destination] = []
     skips: list[Skip] = []
 
@@ -408,61 +416,119 @@ def plan_library(rel_paths: list[Path], include_podcasts: bool) -> Plan:
         else:
             skips.append(decision)
 
-    destinations, warnings = uniquify_destinations(destinations)
+    destinations, deletes, warnings = uniquify_destinations(destinations, source_root)
     return Plan(
         discovered=len(rel_paths),
         destinations=destinations,
+        deletes=deletes,
         skips=skips,
         warnings=warnings,
     )
 
 
-def uniquify_destinations(destinations: list[Destination]) -> tuple[list[Destination], list[str]]:
-    seen: dict[Path, int] = {}
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def files_are_identical(source_root: Optional[Path], first: Path, second: Path, hash_cache: dict[Path, str]) -> bool:
+    if source_root is None:
+        return False
+
+    first_abs = source_root / first
+    second_abs = source_root / second
+    if not first_abs.is_file() or not second_abs.is_file():
+        return False
+    if first_abs.stat().st_size != second_abs.stat().st_size:
+        return False
+
+    for path in (first_abs, second_abs):
+        if path not in hash_cache:
+            hash_cache[path] = sha256_file(path)
+    return hash_cache[first_abs] == hash_cache[second_abs]
+
+
+def unique_target(target: Path, seen: dict[Path, Destination]) -> Path:
+    suffix = 2
+    new_target = target.with_name(f"{target.stem}_{suffix}{target.suffix}")
+    while new_target in seen:
+        suffix += 1
+        new_target = target.with_name(f"{target.stem}_{suffix}{target.suffix}")
+    return new_target
+
+
+def uniquify_destinations(
+    destinations: list[Destination],
+    source_root: Optional[Path],
+) -> tuple[list[Destination], list[Delete], list[str]]:
+    seen: dict[Path, Destination] = {}
+    hash_cache: dict[Path, str] = {}
     result: list[Destination] = []
+    deletes: list[Delete] = []
     warnings: list[str] = []
 
     for item in destinations:
         target = item.target
         if target not in seen:
-            seen[target] = 1
+            seen[target] = item
             result.append(item)
+            continue
+
+        existing = seen[target]
+        if files_are_identical(source_root, existing.source, item.source, hash_cache):
+            deletes.append(Delete(item.source, f"exact duplicate of {existing.source}"))
+            warnings.append(f"exact duplicate: {item.source} == {existing.source}; delete source")
             continue
 
         if item.reason == "cover art" and target.stem == "folder":
             target = target.parent / "Artwork" / (sanitize_component(item.source.stem) + target.suffix)
             if target not in seen:
-                seen[target] = 1
+                redirected = Destination(item.source, target, "additional artwork")
+                seen[target] = redirected
                 warnings.append(f"cover collision: {item.target} -> {target}")
-                result.append(Destination(item.source, target, "additional artwork"))
+                result.append(redirected)
                 continue
+            existing = seen[target]
+            if files_are_identical(source_root, existing.source, item.source, hash_cache):
+                deletes.append(Delete(item.source, f"exact duplicate of {existing.source}"))
+                warnings.append(f"exact duplicate: {item.source} == {existing.source}; delete source")
+                continue
+            item = Destination(item.source, target, "additional artwork")
 
-        seen[target] += 1
-        suffix = seen[target]
-        new_target = target.with_name(f"{target.stem}_{suffix}{target.suffix}")
-        while new_target in seen:
-            suffix += 1
-            new_target = target.with_name(f"{target.stem}_{suffix}{target.suffix}")
-        seen[new_target] = 1
+        new_target = unique_target(target, seen)
+        renamed = Destination(item.source, new_target, item.reason)
+        seen[new_target] = renamed
         warnings.append(f"collision: {target} -> {new_target}")
-        result.append(Destination(item.source, new_target, item.reason))
+        result.append(renamed)
 
-    return result, warnings
+    return result, deletes, warnings
 
 
-def write_report(path: Path, destinations: list[Destination], skips: list[Skip]) -> None:
+def write_report(path: Path, destinations: list[Destination], deletes: list[Delete], skips: list[Skip]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["action", "source", "target", "reason"])
         for item in destinations:
             writer.writerow(["move", item.source, item.target, item.reason])
+        for item in deletes:
+            writer.writerow(["delete", item.source, "", item.reason])
         for item in skips:
             writer.writerow(["skip", item.source, "", item.reason])
 
 
-def move_files(source_root: Path, dest_root: Path, destinations: list[Destination], overwrite: bool) -> tuple[int, int]:
+def apply_plan(
+    source_root: Path,
+    dest_root: Path,
+    destinations: list[Destination],
+    deletes: list[Delete],
+    overwrite: bool,
+) -> tuple[int, int, int]:
     moved = 0
     unchanged = 0
+    deleted = 0
 
     for item in destinations:
         source = source_root / item.source
@@ -482,7 +548,16 @@ def move_files(source_root: Path, dest_root: Path, destinations: list[Destinatio
         shutil.move(str(source), str(target))
         moved += 1
 
-    return moved, unchanged
+    for item in deletes:
+        source = source_root / item.source
+        if not source.exists():
+            continue
+        if not source.is_file():
+            raise FileExistsError(f"Refusing to delete non-file duplicate source: {source}")
+        source.unlink()
+        deleted += 1
+
+    return moved, unchanged, deleted
 
 
 def parse_args() -> argparse.Namespace:
@@ -520,13 +595,14 @@ def main() -> int:
     if args.limit:
         rel_paths = rel_paths[: args.limit]
 
-    plan = plan_library(rel_paths, args.include_podcasts)
-    write_report(report_path, plan.destinations, plan.skips)
+    plan = plan_library(rel_paths, args.include_podcasts, source_root)
+    write_report(report_path, plan.destinations, plan.deletes, plan.skips)
 
     print(f"Scanned: {source_root}")
     print(f"Destination: {dest_root}")
     print(f"Discovered files: {plan.discovered}")
     print(f"Planned moves: {len(plan.destinations)}")
+    print(f"Exact duplicate deletes: {len(plan.deletes)}")
     print(f"Skipped: {len(plan.skips)}")
     print(f"Collision renames: {len(plan.warnings)}")
     print(f"Report: {report_path}")
@@ -547,9 +623,10 @@ def main() -> int:
         print("Dry run only. Re-run with --apply to move files.")
         return 0
 
-    moved, unchanged = move_files(source_root, dest_root, plan.destinations, args.overwrite)
+    moved, unchanged, deleted = apply_plan(source_root, dest_root, plan.destinations, plan.deletes, args.overwrite)
     print(f"Moved files: {moved}")
     print(f"Already in place: {unchanged}")
+    print(f"Deleted exact duplicates: {deleted}")
     return 0
 
 
