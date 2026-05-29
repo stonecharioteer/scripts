@@ -53,6 +53,7 @@ JUNK_EXTS = {
     ".sfv",
     ".srr",
     ".txt",
+    ".toc",
     ".url",
     ".vob",
 }
@@ -83,6 +84,15 @@ NOISE_WORDS = (
     r"cdrip",
     r"remastered",
     r"bubanee",
+)
+
+COMPILATION_WORDS = (
+    r"best\s+songs",
+    r"essentials",
+    r"hits",
+    r"playlist",
+    r"soundtrack",
+    r"various\s+artists",
 )
 
 
@@ -241,6 +251,11 @@ def parse_artist_from_release(value: str) -> Optional[str]:
     return None
 
 
+def looks_like_compilation(value: str) -> bool:
+    value = strip_noise(value)
+    return bool(re.search(r"\b(?:" + "|".join(COMPILATION_WORDS) + r")\b", value, flags=re.I))
+
+
 def is_disc_dir(value: str) -> tuple[bool, str]:
     match = re.search(r"\b(?:disc|cd)\s*(?P<num>\d+)\b(?:\s*[-_]\s*(?P<label>.*))?", value, flags=re.I)
     if not match:
@@ -326,6 +341,10 @@ def infer_context(rel_path: Path, include_podcasts: bool) -> Optional[tuple[str,
             artist = normalize_artist(top)
             album = parse_album(parts[1], artist)
             album_index = 1
+        elif len(parts) >= 2 and looks_like_compilation(top):
+            artist = "Various Artists"
+            album = parse_album(top, artist)
+            album_index = 0
         else:
             return None
 
@@ -355,6 +374,19 @@ def image_target(rel_path: Path, artist: str, album: str) -> Path:
     return album_root / "Artwork" / (sanitize_component(rel_path.stem) + ext)
 
 
+def artist_image_target(rel_path: Path) -> Optional[Path]:
+    if len(rel_path.parts) != 2 or rel_path.suffix.lower() not in IMAGE_EXTS:
+        return None
+
+    artist = parse_artist_from_release(rel_path.parts[0])
+    if artist is None:
+        if "&" not in rel_path.parts[0]:
+            return None
+        artist = normalize_artist(rel_path.parts[0])
+
+    return Path(sanitize_component(artist)) / "Artwork" / (sanitize_component(rel_path.stem) + rel_path.suffix.lower())
+
+
 def target_for_path(rel_path: Path, include_podcasts: bool) -> Union[Destination, Skip]:
     ext = rel_path.suffix.lower()
 
@@ -363,6 +395,12 @@ def target_for_path(rel_path: Path, include_podcasts: bool) -> Union[Destination
 
     context = infer_context(rel_path, include_podcasts)
     if context is None:
+        if artist_image := artist_image_target(rel_path):
+            return Destination(rel_path, artist_image, "artist artwork")
+        if ext in JUNK_EXTS:
+            return Skip(rel_path, "non-library sidecar/junk file")
+        if ext not in AUDIO_EXTS and ext not in IMAGE_EXTS:
+            return Skip(rel_path, f"unsupported extension: {ext or '(none)'}")
         return Skip(rel_path, "could not infer artist/album or podcast skipped")
 
     artist, album, disc = context
