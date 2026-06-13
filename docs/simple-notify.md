@@ -11,7 +11,7 @@ I wanted a tiny command-line wrapper for Simplepush so shell scripts and one-off
 Payload format:
 
 ```json
-{"key":"<SIMPLE_PUSH_KEY>","msg":"<message>"}
+{"key":"<SIMPLE_PUSH_KEY>","title":"<optional-title>","msg":"<message>"}
 ```
 
 ## Requirements
@@ -37,24 +37,25 @@ set -x SIMPLE_PUSH_KEY your-simplepush-key
 
 ```bash
 ./simple-notify.sh "Build finished"
-./simple-notify.sh Deploy completed successfully
+./simple-notify.sh --title "Deploy" "Completed successfully"
 
-echo "Nightly backup is done" | ./simple-notify.sh
+echo "Nightly backup is done" | ./simple-notify.sh --title "Backup"
 ```
 
 ## Features
 
 - **Simple setup**: only needs `curl` and `SIMPLE_PUSH_KEY`
-- **JSON payload**: sends the expected `key` and `msg` fields
+- **JSON payload**: sends the expected `key`, optional `title`, and `msg` fields
 - **Flexible input**: accepts message text as arguments or from stdin
 - **Helpful errors**: validates missing key, empty message, and missing dependencies
 
 ## Options
 
 ```text
--h, --help     Show help
--q, --quiet    Suppress API response output
--u, --url URL  Override the endpoint
+-h, --help           Show help
+-q, --quiet          Suppress API response output
+-t, --title TITLE    Optional notification title
+-u, --url URL        Override the endpoint
 ```
 
 ## Installation
