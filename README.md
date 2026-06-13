@@ -18,7 +18,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
 
 ### Notifications
-- **[simple-notify.sh](docs/simple-notify.md)** - Send Simplepush notifications with curl and a JSON payload
+- **[simple-notify.sh](docs/simple-notify.md)** - Send Simplepush notifications with curl, optional titles, and a JSON payload
 
 ### Infrastructure Monitoring
 - **[power-monitor](docs/power-monitor.md)** - House and room-level power monitoring with backup-aware logic and MAC validation
@@ -42,7 +42,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ./gi-select.sh  # Interactive selection
 
 # Send a Simplepush notification
-./simple-notify.sh "Build finished"
+./simple-notify.sh --title "Build" "Finished"
 
 # Import Kindle highlights from multiple devices
 ./highlight-manager.sh import kindle_*.txt koreader_*.txt
