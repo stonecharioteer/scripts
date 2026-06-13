@@ -17,6 +17,9 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
 
+### Notifications
+- **[simple-notify.sh](docs/simple-notify.md)** - Send Simplepush notifications with curl and a JSON payload
+
 ### Infrastructure Monitoring
 - **[power-monitor](docs/power-monitor.md)** - House and room-level power monitoring with backup-aware logic and MAC validation
 
@@ -37,6 +40,9 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 
 # Generate .gitignore for Python project
 ./gi-select.sh  # Interactive selection
+
+# Send a Simplepush notification
+./simple-notify.sh "Build finished"
 
 # Import Kindle highlights from multiple devices
 ./highlight-manager.sh import kindle_*.txt koreader_*.txt
@@ -60,6 +66,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | audible-download | `uvx`, `audible-cli`, `gum` |
 | gi-select | `gum`, gitignore repository |
 | highlight-manager | `duckdb`, `gum`, `jq`, `python3` |
+| simple-notify | `curl` |
 | power-monitor | `duckdb`, `ping`, `arp`, `jq`, `gum` |
 | set-locale | `locale-gen`, `sudo` access |
 
@@ -101,6 +108,7 @@ docs/
 ├── audible-download.md      # Audible bulk downloads
 ├── gi-select.md            # Interactive gitignore generation
 ├── highlight-manager.md     # Kindle highlights management
+├── simple-notify.md        # Simplepush notifications
 ├── power-monitor.md        # Power monitoring system
 ├── set-locale.md           # System locale configuration
 └── til/                    # Today I Learned entries
