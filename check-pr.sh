@@ -49,7 +49,9 @@ color_review() {
   case "${1:-}" in
     APPROVED) gum style --foreground 42 "${1}" ;;
     CHANGES_REQUESTED) gum style --foreground 196 "${1}" ;;
+    COMMENTED) gum style --foreground 214 "${1}" ;;
     REVIEW_REQUIRED) gum style --foreground 214 "${1}" ;;
+    BLOCKED|RATE_LIMITED) gum style --foreground 196 "${1}" ;;
     ""|-) gum style --foreground 244 "${1:--}" ;;
     *) gum style --foreground 244 "${1}" ;;
   esac
@@ -104,7 +106,6 @@ render_once() {
   base=$(echo "$pr" | jq -r '.baseRefName')
   head=$(echo "$pr" | jq -r '.headRefName')
   draft=$(echo "$pr" | jq -r '.isDraft')
-  review=$(echo "$pr" | jq -r '.reviewDecision // "REVIEW_REQUIRED"')
   merge=$(echo "$pr" | jq -r '.mergeStateStatus // "UNKNOWN"')
 
   check_rows=$(echo "$pr" | jq -r '
@@ -124,6 +125,7 @@ render_once() {
     -F number="$number")
 
   reviews_json=$(gh api "repos/$owner/$repo/pulls/$number/reviews")
+  comments_json=$(gh api "repos/$owner/$repo/issues/$number/comments")
 
   unresolved_threads=$(echo "$threads_json" | jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)]')
   unresolved_thread_count=$(echo "$unresolved_threads" | jq 'length')
@@ -136,11 +138,85 @@ render_once() {
   changes_requested_count=$(echo "$reviews_json" | jq '[.[] | select(.state == "CHANGES_REQUESTED")] | length')
   changes_requested_reviewer_count=$(echo "$reviews_json" | jq '[.[] | select(.state == "CHANGES_REQUESTED") | .user.login] | unique | length')
 
+  bot_reviews=$(echo "$reviews_json" | jq '
+    group_by(.user.login)
+    | map(max_by(.submittedAt))
+    | map(select(.user.type == "Bot"))
+  ')
+  bot_review_count=$(echo "$bot_reviews" | jq 'length')
+
+  bot_blocked=$(echo "$comments_json" | jq -r '
+    [.[] | select(.user.type == "Bot")]
+    | map(select(
+        .body | test("couldn.t start this review"; "i")
+        or test("Review limit reached"; "i")
+        or test("rate limited by coderabbit"; "i")
+        or test("used up its prepaid credits"; "i")
+        or test("credit purchases are no longer available"; "i")
+        or test("Review skipped: free tier disabled"; "i")
+        or test("reached your Codex usage limits"; "i")
+        or test("More reviews will be available in"; "i")
+      ))
+    | map(.user.login | sub("\\[bot\\]$"; ""))
+    | unique
+    | .[]
+  ')
+  bot_blocked=${bot_blocked:-}
+
+  bot_warnings=$(echo "$comments_json" | jq -r '
+    [.[] | select(.user.type == "Bot")]
+    | map(select(
+        (.body | test("\\[!WARNING\\]"; "i") or test("\\[!CAUTION\\]"; "i"))
+        and (.body | test("couldn.t start this review"; "i") | not)
+        and (.body | test("Review limit reached"; "i") | not)
+        and (.body | test("rate limited by coderabbit"; "i") | not)
+        and (.body | test("used up its prepaid credits"; "i") | not)
+        and (.body | test("credit purchases are no longer available"; "i") | not)
+        and (.body | test("Review skipped: free tier disabled"; "i") | not)
+        and (.body | test("reached your Codex usage limits"; "i") | not)
+        and (.body | test("More reviews will be available in"; "i") | not)
+      ))
+    | map(.user.login | sub("\\[bot\\]$"; ""))
+    | unique
+    | .[]
+  ')
+  bot_warnings=${bot_warnings:-}
+
+  blocked_json=$(echo "$bot_blocked" | jq -R -s 'split("\n") | map(select(. != ""))')
+  effective_review=$(echo "$reviews_json" | jq -r \
+    --argjson blocked "$blocked_json" \
+    '
+      group_by(.user.login)
+      | map(max_by(.submittedAt))
+      | map(select(.user.type != "Bot" or (
+          .user.login | sub("\\[bot\\]$"; "") as $name
+          | ($blocked | contains([$name]) | not)
+        )))
+      | map(.state)
+      | if contains(["CHANGES_REQUESTED"]) then "CHANGES_REQUESTED"
+        elif contains(["COMMENTED"]) then "COMMENTED"
+        elif contains(["APPROVED"]) then "APPROVED"
+        else "REVIEW_REQUIRED"
+        end
+    ')
+
+  bot_unresolved_counts=$(echo "$unresolved_threads" | jq -r '
+    if length == 0 then empty else
+      group_by(.comments.nodes[0].author.login)
+      | map({
+          author: (.[0].comments.nodes[0].author.login | sub("\\[bot\\]$"; "")),
+          count: length
+        })
+      | .[]
+      | .author + "|" + (.count | tostring)
+    end
+  ')
+
   gum style --border rounded --padding "0 1" --margin "1 0" --foreground 212 \
     "$owner/$repo PR #$number · $title"
 
   gum style "branch  $head → $base"
-  printf 'review  %s\n' "$(color_review "$review")"
+  printf 'review  %s\n' "$(color_review "$effective_review")"
   printf 'merge   %s\n' "$(color_merge "$merge")"
   printf 'draft   %s\n' "$(color_draft "$draft")"
   gum style "url     $url"
@@ -152,7 +228,34 @@ render_once() {
     printf '  result: %s\n' "$(color_status "${conclusion:--}")"
   done
 
-  if [ "$review" = "CHANGES_REQUESTED" ]; then
+  if [ "$bot_review_count" -gt 0 ]; then
+    gum style --margin "1 0 0 0" --bold "Bot Reviews"
+    echo "$bot_reviews" | jq -c '.[]' | while IFS= read -r bot_review; do
+      bot_name=$(echo "$bot_review" | jq -r '.user.login | sub("\\[bot\\]$"; "")')
+      bot_state=$(echo "$bot_review" | jq -r '.state')
+      bot_unresolved=$(echo "$bot_unresolved_counts" | grep "^$bot_name|" | cut -d'|' -f2 || true)
+      bot_unresolved=${bot_unresolved:-0}
+      is_blocked=$(echo "$bot_blocked" | grep -c "^$bot_name$" || true)
+      has_warning=$(echo "$bot_warnings" | grep -c "^$bot_name$" || true)
+
+      if [ "$is_blocked" -gt 0 ] && [ "$bot_state" = "APPROVED" ]; then
+        bot_state="BLOCKED"
+      fi
+
+      gum style "• $bot_name"
+      printf '  review: %s\n' "$(color_review "$bot_state")"
+      if [ "$bot_unresolved" -gt 0 ]; then
+        gum style --foreground 214 "  unresolved threads: $bot_unresolved"
+      fi
+      if [ "$is_blocked" -gt 0 ]; then
+        gum style --foreground 196 "  ⛔ Review blocked (quota/rate limit)"
+      elif [ "$has_warning" -gt 0 ]; then
+        gum style --foreground 214 "  ⚠️ Warning found in comments"
+      fi
+    done
+  fi
+
+  if [ "$effective_review" = "CHANGES_REQUESTED" ] || [ "$effective_review" = "COMMENTED" ]; then
     gum style --margin "1 0 0 0" --bold "Requested changes"
     gum style "reviews   $changes_requested_count"
     gum style "reviewers $changes_requested_reviewer_count"
