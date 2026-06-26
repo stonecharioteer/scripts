@@ -14,7 +14,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[audible-download.sh](docs/audible-download.md)** - Bulk download audiobooks from Audible with filtering options
 
 ### Development Tools
-- **[check-pr.sh](check-pr.sh)** - Summarize open GitHub PR readiness with draft/check awareness and bot review awareness (CodeRabbit, etc.)
+- **[check-pr.sh](check-pr.sh)** - Summarize open GitHub PR readiness with Rich tables, draft/check awareness, and bot review awareness (CodeRabbit, etc.)
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
 
@@ -71,7 +71,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | audiobook-pipeline | `uvx`, `audible-cli`, `ffmpeg`, `gum` |
 | audiobook-split | `ffmpeg`, `gum` |
 | audible-download | `uvx`, `audible-cli`, `gum` |
-| check-pr | `gh`, `jq`, `gum`, `git` |
+| check-pr | `uv`, `gh`, `git` |
 | gi-select | `gum`, gitignore repository |
 | highlight-manager | `duckdb`, `gum`, `jq`, `python3` |
 | simple-notify | `curl` |
