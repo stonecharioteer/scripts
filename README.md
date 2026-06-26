@@ -14,7 +14,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[audible-download.sh](docs/audible-download.md)** - Bulk download audiobooks from Audible with filtering options
 
 ### Development Tools
-- **[check-pr.sh](check-pr.sh)** - Summarize open GitHub PR status with bot review awareness (CodeRabbit, etc.)
+- **[check-pr.sh](check-pr.sh)** - Summarize open GitHub PR readiness with draft/check awareness and bot review awareness (CodeRabbit, etc.)
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
 
@@ -40,8 +40,10 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ./audible-download.sh --start-date "2024-01-01" --all
 
 # Check status of open PR for current branch
-./check-pr.sh  # Show PR summary with checks and bot reviews
+./check-pr.sh  # Show merge readiness, draft state, checks, and bot reviews
 ./check-pr.sh -w  # Watch mode, refresh every 30 seconds
+./check-pr.sh --concise  # Show only summary and items needing attention
+./check-pr.sh /path/to/repo  # Check a PR from another repository directory
 
 # Generate .gitignore for Python project
 ./gi-select.sh  # Interactive selection
