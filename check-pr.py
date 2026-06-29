@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import io
 import json
 import os
 import re
@@ -12,11 +13,13 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from rich.console import Console
+from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
@@ -29,6 +32,18 @@ class CheckRow:
     state: str
     details: str
     runner: str = ""
+    duration: str = ""
+    previous_duration: str = ""
+
+
+@dataclass
+class ActionInfo:
+    runner: str = ""
+    duration: str = ""
+    previous_duration: str = ""
+    name: str = ""
+    workflow: str = ""
+    run_id: int | None = None
 
 
 def run(cmd: list[str], cwd: Path, *, check: bool = True) -> str:
@@ -37,6 +52,18 @@ def run(cmd: list[str], cwd: Path, *, check: bool = True) -> str:
         message = result.stderr.strip() or result.stdout.strip() or f"command failed: {' '.join(cmd)}"
         raise RuntimeError(message)
     return result.stdout
+
+
+def friendly_error(exc: Exception) -> str:
+    message = str(exc).strip()
+    lower = message.lower()
+    if "error connecting to api.github.com" in lower or "check your internet connection" in lower:
+        return "GitHub API is unavailable or unreachable; keeping the last successful watch result if available."
+    if "http 5" in lower or "githubstatus.com" in lower:
+        return "GitHub appears to be having problems; try again shortly."
+    if "rate limit" in lower:
+        return "GitHub API rate limit reached; try again later."
+    return message
 
 
 def run_json(cmd: list[str], cwd: Path, *, check: bool = True) -> Any:
@@ -93,40 +120,107 @@ def check_effective_state(raw: dict[str, Any]) -> str:
     return conclusion or rollup_state or status or "-"
 
 
-def action_runner(link: str, owner: str, repo_name: str, cwd: Path) -> str:
+def parse_time(value: str | None) -> datetime | None:
+    if not value or value.startswith("0001-"):
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def format_duration(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
+def job_duration(job: dict[str, Any]) -> str:
+    started = parse_time(job.get("started_at") or job.get("startedAt"))
+    if not started:
+        return ""
+    completed = parse_time(job.get("completed_at") or job.get("completedAt")) or datetime.now(UTC)
+    return format_duration((completed - started).total_seconds())
+
+
+def action_info(link: str, owner: str, repo_name: str, cwd: Path) -> ActionInfo:
     match = re.search(r"/job/(\d+)(?:\D|$)", link or "")
     if not match:
-        return ""
+        return ActionInfo()
     job = run_json(["gh", "api", f"repos/{owner}/{repo_name}/actions/jobs/{match.group(1)}"], cwd, check=False)
     if not isinstance(job, dict):
-        return ""
+        return ActionInfo()
     runner = str(job.get("runner_name") or "")
-    if runner:
-        return runner
     labels = job.get("labels") or []
-    if isinstance(labels, list) and labels:
-        return "labels: " + ", ".join(str(label) for label in labels)
-    return ""
+    if not runner and isinstance(labels, list) and labels:
+        runner = "labels: " + ", ".join(str(label) for label in labels)
+    run_id = job.get("run_id")
+    return ActionInfo(
+        runner=runner,
+        duration=job_duration(job),
+        name=str(job.get("name") or ""),
+        workflow=str(job.get("workflow_name") or ""),
+        run_id=int(run_id) if isinstance(run_id, int) else None,
+    )
 
 
-def action_runners(links: list[str], owner: str, repo_name: str, cwd: Path) -> dict[str, str]:
+def previous_durations(infos: dict[str, ActionInfo], owner: str, repo_name: str, branch: str, cwd: Path) -> dict[tuple[str, str], str]:
+    wanted = {(info.workflow, info.name) for info in infos.values() if info.workflow and info.name}
+    current_runs = {info.run_id for info in infos.values() if info.run_id}
+    if not wanted:
+        return {}
+    runs = run_json([
+        "gh", "api", "--method", "GET", f"repos/{owner}/{repo_name}/actions/runs",
+        "-f", f"branch={branch}", "-f", "event=pull_request", "-f", "per_page=30",
+    ], cwd, check=False)
+    candidates = [
+        run for run in (runs or {}).get("workflow_runs", [])
+        if run.get("id") not in current_runs and (run.get("name"), "") not in wanted
+    ]
+    candidates = [run for run in candidates if run.get("name") in {workflow for workflow, _ in wanted}]
+    found: dict[tuple[str, str], str] = {}
+
+    def run_jobs(run_id: int) -> list[dict[str, Any]]:
+        data = run_json(["gh", "api", "--method", "GET", f"repos/{owner}/{repo_name}/actions/runs/{run_id}/jobs", "-f", "per_page=100"], cwd, check=False)
+        return data.get("jobs", []) if isinstance(data, dict) else []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(candidates) or 1)) as executor:
+        future_to_run = {executor.submit(run_jobs, int(run["id"])): run for run in candidates[:12] if run.get("id")}
+        for future in concurrent.futures.as_completed(future_to_run):
+            workflow = str(future_to_run[future].get("name") or "")
+            for job in future.result():
+                key = (workflow, str(job.get("name") or ""))
+                if key in wanted and key not in found:
+                    duration = job_duration(job)
+                    if duration:
+                        found[key] = duration
+    return found
+
+
+def action_infos(links: list[str], owner: str, repo_name: str, branch: str, cwd: Path) -> dict[str, ActionInfo]:
     unique_links = sorted({link for link in links if link})
     if not unique_links:
         return {}
     max_workers = min(8, len(unique_links))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        return dict(zip(
+        infos = dict(zip(
             unique_links,
-            executor.map(lambda link: action_runner(link, owner, repo_name, cwd), unique_links),
+            executor.map(lambda link: action_info(link, owner, repo_name, cwd), unique_links),
             strict=True,
         ))
+    previous = previous_durations(infos, owner, repo_name, branch, cwd)
+    for info in infos.values():
+        info.previous_duration = previous.get((info.workflow, info.name), "")
+    return infos
 
 
-def build_checks(pr: dict[str, Any], number: int, owner: str, repo_name: str, cwd: Path) -> list[CheckRow]:
+def build_checks(pr: dict[str, Any], number: int, owner: str, repo_name: str, branch: str, cwd: Path) -> list[CheckRow]:
     checks_json = run_json(["gh", "pr", "checks", str(number), "--json", "name,state,bucket,link"], cwd, check=False)
     rows: list[CheckRow] = []
     if isinstance(checks_json, list) and checks_json:
-        runners = action_runners([item.get("link") or "" for item in checks_json], owner, repo_name, cwd)
+        infos = action_infos([item.get("link") or "" for item in checks_json], owner, repo_name, branch, cwd)
         for item in checks_json:
             state = check_effective_state(item)
             detail = {
@@ -136,17 +230,19 @@ def build_checks(pr: dict[str, Any], number: int, owner: str, repo_name: str, cw
                 "CANCELLED": "cancelled",
             }.get(state, "running" if state in {"PENDING", "IN_PROGRESS", "QUEUED", "WAITING", "REQUESTED"} else "")
             link = item.get("link") or ""
-            rows.append(CheckRow(item.get("name") or "unknown", state, detail or state.lower(), runners.get(link, "")))
+            info = infos.get(link, ActionInfo())
+            rows.append(CheckRow(item.get("name") or "unknown", state, detail or state.lower(), info.runner, info.duration, info.previous_duration))
         return rows
 
     rollup = pr.get("statusCheckRollup") or []
-    runners = action_runners([item.get("detailsUrl") or "" for item in rollup], owner, repo_name, cwd)
+    infos = action_infos([item.get("detailsUrl") or "" for item in rollup], owner, repo_name, branch, cwd)
     for item in rollup:
         name = item.get("name") or item.get("context") or "unknown"
         state = check_effective_state(item)
         detail = "completed" if item.get("conclusion") else "running"
         link = item.get("detailsUrl") or ""
-        rows.append(CheckRow(name, state, detail, runners.get(link, "")))
+        info = infos.get(link, ActionInfo())
+        rows.append(CheckRow(name, state, detail, info.runner, info.duration, info.previous_duration))
     if not rows:
         rows.append(CheckRow("(no checks reported)", "-", ""))
     return rows
@@ -231,7 +327,10 @@ def bot_activity(comments: list[dict[str, Any]], checks: list[CheckRow]) -> tupl
         warning = "[!warning]" in joined or "[!caution]" in joined
         if bot_check_running:
             state = bot_check_state
-            details = f"{len(bodies)} issue comment(s), review running"
+            if latest_is_review:
+                details = f"new review running; {len(bodies)} previous issue comment(s) may be stale"
+            else:
+                details = f"{len(bodies)} issue comment(s), review running"
         elif skipped:
             state = "SKIPPED"
             details = f"{len(bodies)} issue comment(s), review skipped"
@@ -254,23 +353,23 @@ def bot_activity(comments: list[dict[str, Any]], checks: list[CheckRow]) -> tupl
     return rows, coderabbit_skipped
 
 
-def render(args: argparse.Namespace) -> int:
+def render(args: argparse.Namespace, out: Console = console, footer: str | None = None) -> int:
     cwd = Path(args.directory or os.getcwd()).expanduser().resolve()
     if not cwd.exists():
-        console.print(f"[red]Directory does not exist:[/] {cwd}")
+        out.print(f"[red]Directory does not exist:[/] {cwd}")
         return 1
     for cmd in ("git", "gh"):
         if not shutil.which(cmd):
-            console.print(f"[red]{cmd} is required[/]")
+            out.print(f"[red]{cmd} is required[/]")
             return 1
 
     if run(["git", "rev-parse", "--is-inside-work-tree"], cwd, check=False).strip() != "true":
-        console.print(f"[red]Directory is not inside a git repository:[/] {cwd}")
+        out.print(f"[red]Directory is not inside a git repository:[/] {cwd}")
         return 1
 
     branch = run(["git", "branch", "--show-current"], cwd).strip()
     if not branch:
-        console.print("[red]Could not determine current git branch[/]")
+        out.print("[red]Could not determine current git branch[/]")
         return 1
 
     repo = run_json(["gh", "repo", "view", "--json", "owner,name"], cwd)
@@ -283,7 +382,7 @@ def render(args: argparse.Namespace) -> int:
         "--limit", "1",
     ], cwd)
     if not pr_list:
-        console.print(f"[yellow]No open PR found for {owner}/{repo_name} branch: {branch}[/]")
+        out.print(f"[yellow]No open PR found for {owner}/{repo_name} branch: {branch}[/]")
         return 1
 
     pr = pr_list[0]
@@ -291,7 +390,7 @@ def render(args: argparse.Namespace) -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         comments_future = executor.submit(run_json, ["gh", "api", f"repos/{owner}/{repo_name}/issues/{number}/comments"], cwd)
         reviews_future = executor.submit(run_json, ["gh", "api", f"repos/{owner}/{repo_name}/pulls/{number}/reviews"], cwd)
-        checks_future = executor.submit(build_checks, pr, number, owner, repo_name, cwd)
+        checks_future = executor.submit(build_checks, pr, number, owner, repo_name, branch, cwd)
         comments = comments_future.result() or []
         reviews = reviews_future.result() or []
         checks = checks_future.result()
@@ -357,32 +456,40 @@ def render(args: argparse.Namespace) -> int:
         effective_review=effective_review,
     )
 
-    console.rule(f"[bold magenta]{owner}/{repo_name} PR #{number} · {pr.get('title')}[/]", characters="─")
-    console.print(f"branch  {shorten(head, 42)} → {base}")
+    out.rule(f"[bold magenta]{owner}/{repo_name} PR #{number} · {pr.get('title')}[/]", characters="─")
+    out.print(f"branch  {shorten(head, 42)} → {base}")
     if not args.concise:
-        console.print(f"path    {cwd}")
-        console.print(f"url     {pr.get('url')}")
-    console.print("status  ", styled(status_state), f" {status_detail}", sep="")
+        out.print(f"path    {cwd}")
+        out.print(f"url     {pr.get('url')}")
+    out.print("status  ", styled(status_state), f" {status_detail}", sep="")
 
     if attention:
         needs = table("Needs attention", ["Item", "State", "Why it matters"])
         for item, state, why in attention:
             needs.add_row(item, styled(state), why)
-        console.print(needs)
+        out.print(needs)
 
     visible_checks = [c for c in checks if not args.concise or c.state not in {"SUCCESS", "PASSED", "PASSING"}]
     if visible_checks:
         check_columns = ["Check", "State"]
         show_runners = any(c.runner for c in visible_checks)
+        show_durations = any(c.duration or c.previous_duration for c in visible_checks)
         if show_runners:
             check_columns.append("Runner")
+        if show_durations:
+            check_columns.append("Time")
         checks_table = table("Checks", check_columns)
         for c in visible_checks:
             row = [c.name, styled(c.state)]
             if show_runners:
                 row.append(c.runner or "-")
+            if show_durations:
+                duration = c.duration or "-"
+                if c.previous_duration:
+                    duration += f" (prev {c.previous_duration})"
+                row.append(duration)
             checks_table.add_row(*row)
-        console.print(checks_table)
+        out.print(checks_table)
 
     visible_bots = [
         b
@@ -395,7 +502,9 @@ def render(args: argparse.Namespace) -> int:
         bot_table = table("Bot activity", ["Bot", "State", "Details"])
         for bot, state, details in visible_bots:
             bot_table.add_row(bot, styled(state), details)
-        console.print(bot_table)
+        out.print(bot_table)
+    if footer:
+        out.print(f"\n[grey62]{footer}[/]")
     return 0
 
 
@@ -412,22 +521,76 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def render_text(args: argparse.Namespace, footer: str | None = None) -> tuple[Text, int]:
+    buffer = io.StringIO()
+    capture_console = Console(
+        file=buffer,
+        force_terminal=True,
+        color_system=console.color_system,
+        width=console.width,
+        legacy_windows=False,
+    )
+    try:
+        code = render(args, capture_console, footer)
+    except Exception as exc:  # noqa: BLE001 - CLI should render errors cleanly
+        capture_console.print(f"[red]{friendly_error(exc)}[/]")
+        code = 1
+    return Text.from_ansi(buffer.getvalue()), code
+
+
+def with_watch_footer(body: Text, last_updated: datetime | None, next_refresh: float, warning: str = "") -> Text:
+    remaining = max(0, int(next_refresh - time.monotonic()))
+    updated = last_updated.strftime("%Y-%m-%d %H:%M:%S") if last_updated else "never"
+    footer = f"\nLast updated at {updated} · next update in {remaining}s"
+    if warning:
+        footer += f" · last refresh failed: {warning}"
+    output = body.copy()
+    output.append(footer, style="grey62")
+    return output
+
+
+def watch(args: argparse.Namespace) -> int:
+    interval = 30
+    last_updated: datetime | None = None
+    next_refresh = time.monotonic()
+    body: Text | None = None
+    warning = ""
+    code = 0
+
+    with Live(console=console, refresh_per_second=4, transient=False) as live:
+        try:
+            while True:
+                now = time.monotonic()
+                if body is None or now >= next_refresh:
+                    next_refresh = now + interval
+                    new_body, new_code = render_text(args)
+                    if new_code == 0 or body is None:
+                        body = new_body
+                        code = new_code
+                        warning = "" if new_code == 0 else new_body.plain.strip().splitlines()[-1]
+                        if new_code == 0:
+                            last_updated = datetime.now()
+                    else:
+                        warning = new_body.plain.strip().splitlines()[-1]
+                        code = new_code
+
+                live.update(with_watch_footer(body, last_updated, next_refresh, warning))
+                time.sleep(1)
+        except KeyboardInterrupt:
+            console.print("\n[grey62]Interrupted.[/]")
+            return 130
+    return code
+
+
 def main() -> int:
     args = parse_args()
+    if args.watch:
+        return watch(args)
     try:
-        while True:
-            try:
-                code = render(args)
-            except Exception as exc:  # noqa: BLE001 - CLI should render errors cleanly
-                console.print(f"[red]{exc}[/]")
-                code = 1
-            if not args.watch:
-                return code
-            time.sleep(30)
-            console.clear()
-    except KeyboardInterrupt:
-        console.print("\n[grey62]Interrupted.[/]")
-        return 130
+        return render(args)
+    except Exception as exc:  # noqa: BLE001 - CLI should render errors cleanly
+        console.print(f"[red]{friendly_error(exc)}[/]")
+        return 1
 
 
 if __name__ == "__main__":
