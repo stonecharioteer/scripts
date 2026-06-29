@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +28,7 @@ class CheckRow:
     name: str
     state: str
     details: str
+    runner: str = ""
 
 
 def run(cmd: list[str], cwd: Path, *, check: bool = True) -> str:
@@ -45,13 +48,13 @@ def run_json(cmd: list[str], cwd: Path, *, check: bool = True) -> Any:
 
 def style_for(value: str) -> str:
     value = (value or "-").upper()
-    if value in {"READY", "SUCCESS", "PASSING", "PASSED", "CLEAN", "HAS_HOOKS", "MERGEABLE", "APPROVED"}:
+    if value in {"READY", "MERGEABLE", "SUCCESS", "PASSING", "PASSED", "CLEAN", "CURRENT", "HAS_HOOKS", "APPROVED"}:
         return "green"
-    if value in {"DRAFT", "TRUE", "FALSE", "SKIPPED", "NEUTRAL", "-"}:
+    if value in {"TRUE", "FALSE", "SKIPPED", "NEUTRAL", "-"}:
         return "grey62"
-    if value in {"PENDING", "IN_PROGRESS", "QUEUED", "WAITING", "REQUESTED", "BEHIND", "COMMENTED", "WARNING", "NONE"}:
+    if value in {"DRAFT", "PENDING", "IN_PROGRESS", "QUEUED", "WAITING", "REQUESTED", "BEHIND", "COMMENTED", "WARNING", "NONE"}:
         return "yellow"
-    if value in {"NOT_READY", "FAILURE", "FAILED", "FAILING", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "BLOCKED", "DIRTY", "CHANGES_REQUESTED", "CANCELLED", "CANCELED"}:
+    if value in {"NOT_READY", "NOT_MERGEABLE", "FAILURE", "FAILED", "FAILING", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "BLOCKED", "DIRTY", "CONFLICTS", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "CANCELLED", "CANCELED"}:
         return "red"
     return "white"
 
@@ -90,10 +93,40 @@ def check_effective_state(raw: dict[str, Any]) -> str:
     return conclusion or rollup_state or status or "-"
 
 
-def build_checks(pr: dict[str, Any], number: int, cwd: Path) -> list[CheckRow]:
-    checks_json = run_json(["gh", "pr", "checks", str(number), "--json", "name,state,bucket"], cwd, check=False)
+def action_runner(link: str, owner: str, repo_name: str, cwd: Path) -> str:
+    match = re.search(r"/job/(\d+)(?:\D|$)", link or "")
+    if not match:
+        return ""
+    job = run_json(["gh", "api", f"repos/{owner}/{repo_name}/actions/jobs/{match.group(1)}"], cwd, check=False)
+    if not isinstance(job, dict):
+        return ""
+    runner = str(job.get("runner_name") or "")
+    if runner:
+        return runner
+    labels = job.get("labels") or []
+    if isinstance(labels, list) and labels:
+        return "labels: " + ", ".join(str(label) for label in labels)
+    return ""
+
+
+def action_runners(links: list[str], owner: str, repo_name: str, cwd: Path) -> dict[str, str]:
+    unique_links = sorted({link for link in links if link})
+    if not unique_links:
+        return {}
+    max_workers = min(8, len(unique_links))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return dict(zip(
+            unique_links,
+            executor.map(lambda link: action_runner(link, owner, repo_name, cwd), unique_links),
+            strict=True,
+        ))
+
+
+def build_checks(pr: dict[str, Any], number: int, owner: str, repo_name: str, cwd: Path) -> list[CheckRow]:
+    checks_json = run_json(["gh", "pr", "checks", str(number), "--json", "name,state,bucket,link"], cwd, check=False)
     rows: list[CheckRow] = []
     if isinstance(checks_json, list) and checks_json:
+        runners = action_runners([item.get("link") or "" for item in checks_json], owner, repo_name, cwd)
         for item in checks_json:
             state = check_effective_state(item)
             detail = {
@@ -102,14 +135,18 @@ def build_checks(pr: dict[str, Any], number: int, cwd: Path) -> list[CheckRow]:
                 "SKIPPED": "skipped",
                 "CANCELLED": "cancelled",
             }.get(state, "running" if state in {"PENDING", "IN_PROGRESS", "QUEUED", "WAITING", "REQUESTED"} else "")
-            rows.append(CheckRow(item.get("name") or "unknown", state, detail or state.lower()))
+            link = item.get("link") or ""
+            rows.append(CheckRow(item.get("name") or "unknown", state, detail or state.lower(), runners.get(link, "")))
         return rows
 
-    for item in pr.get("statusCheckRollup") or []:
+    rollup = pr.get("statusCheckRollup") or []
+    runners = action_runners([item.get("detailsUrl") or "" for item in rollup], owner, repo_name, cwd)
+    for item in rollup:
         name = item.get("name") or item.get("context") or "unknown"
         state = check_effective_state(item)
         detail = "completed" if item.get("conclusion") else "running"
-        rows.append(CheckRow(name, state, detail))
+        link = item.get("detailsUrl") or ""
+        rows.append(CheckRow(name, state, detail, runners.get(link, "")))
     if not rows:
         rows.append(CheckRow("(no checks reported)", "-", ""))
     return rows
@@ -127,7 +164,44 @@ def check_summary(checks: list[CheckRow]) -> tuple[str, str]:
         state = "PENDING"
     else:
         state = "PASSING"
-    return state, f"{failing} failing, {pending} pending, {passing} passing"
+    return state, f"{failing} fail, {pending} pending"
+
+
+def merge_status_line(
+    *,
+    draft: bool,
+    base_state: str,
+    base: str,
+    check_state: str,
+    check_details: str,
+    effective_review: str,
+) -> tuple[str, str]:
+    blockers: list[str] = []
+    pending: list[str] = []
+
+    if base_state == "CONFLICTS":
+        blockers.append(f"conflicts with {base}")
+    elif base_state == "BEHIND":
+        blockers.append(f"branch behind {base}")
+
+    if effective_review == "CHANGES_REQUESTED":
+        blockers.append("changes requested")
+    elif effective_review == "REVIEW_REQUIRED":
+        blockers.append("review required")
+
+    if check_state == "FAILING":
+        blockers.append(f"checks failing ({check_details})")
+    elif check_state == "PENDING":
+        pending.append(f"checks running ({check_details})")
+
+    details = "; ".join(blockers + pending)
+    if draft:
+        return "DRAFT", details or "mark ready for review before merging"
+    if blockers:
+        return "NOT_MERGEABLE", details
+    if pending:
+        return "WAITING", details
+    return "MERGEABLE", "all detected blockers are clear"
 
 
 def bot_activity(comments: list[dict[str, Any]], checks: list[CheckRow]) -> tuple[list[tuple[str, str, str]], bool]:
@@ -205,7 +279,7 @@ def render(args: argparse.Namespace) -> int:
 
     pr_list = run_json([
         "gh", "pr", "list", "--head", branch, "--state", "open",
-        "--json", "number,title,url,headRefName,baseRefName,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup",
+        "--json", "number,title,url,headRefName,baseRefName,isDraft,reviewDecision,mergeStateStatus,mergeable,statusCheckRollup",
         "--limit", "1",
     ], cwd)
     if not pr_list:
@@ -214,9 +288,13 @@ def render(args: argparse.Namespace) -> int:
 
     pr = pr_list[0]
     number = int(pr["number"])
-    comments = run_json(["gh", "api", f"repos/{owner}/{repo_name}/issues/{number}/comments"], cwd) or []
-    reviews = run_json(["gh", "api", f"repos/{owner}/{repo_name}/pulls/{number}/reviews"], cwd) or []
-    checks = build_checks(pr, number, cwd)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        comments_future = executor.submit(run_json, ["gh", "api", f"repos/{owner}/{repo_name}/issues/{number}/comments"], cwd)
+        reviews_future = executor.submit(run_json, ["gh", "api", f"repos/{owner}/{repo_name}/pulls/{number}/reviews"], cwd)
+        checks_future = executor.submit(build_checks, pr, number, owner, repo_name, cwd)
+        comments = comments_future.result() or []
+        reviews = reviews_future.result() or []
+        checks = checks_future.result()
     bots, coderabbit_skipped = bot_activity(comments, checks)
     if coderabbit_skipped:
         for check in checks:
@@ -227,8 +305,20 @@ def render(args: argparse.Namespace) -> int:
     check_state, check_details = check_summary(checks)
     draft = bool(pr.get("isDraft"))
     merge = pr.get("mergeStateStatus") or "UNKNOWN"
+    mergeable = pr.get("mergeable") or "UNKNOWN"
     base = pr.get("baseRefName") or "base"
     head = pr.get("headRefName") or branch
+
+    if merge == "BEHIND":
+        base_state = "BEHIND"
+    elif merge == "DIRTY" or mergeable == "CONFLICTING":
+        base_state = "CONFLICTS"
+    elif merge in {"CLEAN", "HAS_HOOKS"}:
+        base_state = "CURRENT"
+    elif merge == "BLOCKED" and mergeable == "MERGEABLE":
+        base_state = "CURRENT"
+    else:
+        base_state = merge
 
     latest_by_user: dict[str, str] = {}
     for review in reviews:
@@ -242,44 +332,37 @@ def render(args: argparse.Namespace) -> int:
         effective_review = "APPROVED"
     else:
         effective_review = review_decision
-    commented_count = sum(1 for review in reviews if review.get("state") == "COMMENTED")
-
     attention: list[tuple[str, str, str]] = []
     if draft:
         attention.append(("Draft", "DRAFT", "Mark ready for review; draft PRs can suppress actions/checks."))
-    if merge not in {"CLEAN", "HAS_HOOKS"}:
-        attention.append(("Base branch", merge, f"Update branch with {base} before merging."))
+    if base_state == "BEHIND":
+        attention.append(("Base branch", base_state, f"Update branch with {base} before merging."))
+    elif base_state == "CONFLICTS":
+        attention.append(("Base branch", base_state, f"Resolve conflicts with {base} before merging."))
     if effective_review == "CHANGES_REQUESTED":
         attention.append(("Review", effective_review, "Resolve requested changes."))
+    elif effective_review == "REVIEW_REQUIRED":
+        attention.append(("Review", effective_review, "Get an approving review."))
     if check_state == "FAILING":
         attention.append(("Checks", check_state, check_details + "."))
     elif check_state == "PENDING":
         attention.append(("Checks", check_state, check_details + "."))
 
-    if attention:
-        ready_state = "NOT_READY" if any(s not in {"PENDING"} for _, s, _ in attention) else "WAITING"
-        ready_detail = f"{len([a for a in attention if a[1] != 'PENDING']) or len(attention)} blocker(s)" if ready_state == "NOT_READY" else f"{len(attention)} pending item(s)"
-    else:
-        ready_state = "READY"
-        ready_detail = "no blockers detected"
+    status_state, status_detail = merge_status_line(
+        draft=draft,
+        base_state=base_state,
+        base=base,
+        check_state=check_state,
+        check_details=check_details,
+        effective_review=effective_review,
+    )
 
     console.rule(f"[bold magenta]{owner}/{repo_name} PR #{number} · {pr.get('title')}[/]", characters="─")
     console.print(f"branch  {shorten(head, 42)} → {base}")
     if not args.concise:
         console.print(f"path    {cwd}")
         console.print(f"url     {pr.get('url')}")
-
-    if args.concise:
-        console.print("ready   ", styled(ready_state), f" {ready_detail}", sep="")
-    else:
-        summary = table(None, ["Area", "State", "Details"])
-        summary.add_row("Ready", styled(ready_state), ready_detail)
-        summary.add_row("Draft", styled(str(draft).lower()), "actions may be disabled" if draft else "-")
-        summary.add_row("Base", styled(merge), f"update from {base}")
-        summary.add_row("Checks", styled(check_state), check_details)
-        review_details = f"{commented_count} non-blocking comment review(s)" if commented_count else "-"
-        summary.add_row("Reviews", styled(effective_review), review_details)
-        console.print(summary)
+    console.print("status  ", styled(status_state), f" {status_detail}", sep="")
 
     if attention:
         needs = table("Needs attention", ["Item", "State", "Why it matters"])
@@ -289,9 +372,16 @@ def render(args: argparse.Namespace) -> int:
 
     visible_checks = [c for c in checks if not args.concise or c.state not in {"SUCCESS", "PASSED", "PASSING"}]
     if visible_checks:
-        checks_table = table("Checks", ["Check", "State", "Details"])
+        check_columns = ["Check", "State"]
+        show_runners = any(c.runner for c in visible_checks)
+        if show_runners:
+            check_columns.append("Runner")
+        checks_table = table("Checks", check_columns)
         for c in visible_checks:
-            checks_table.add_row(c.name, styled(c.state), c.details)
+            row = [c.name, styled(c.state)]
+            if show_runners:
+                row.append(c.runner or "-")
+            checks_table.add_row(*row)
         console.print(checks_table)
 
     visible_bots = [
