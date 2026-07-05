@@ -1,0 +1,350 @@
+Partition investigation report
+Host: t14-g2-01
+Date: 2026-07-05T07:03:17+00:00
+User: uid=1000(stonecharioteer) gid=1000(stonecharioteer) groups=1000(stonecharioteer),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),100(users),101(lxd)
+Output file: partition-report-t14-g2-01-20260705-070317.txt
+
+================================================================================
+Kernel and OS
+Command: uname -a
+================================================================================
+Linux t14-g2-01 7.0.0-14-generic #14-Ubuntu SMP PREEMPT_DYNAMIC Mon Apr 13 11:09:53 UTC 2026 x86_64 GNU/Linux
+
+================================================================================
+OS release
+Command: test -r /etc/os-release && cat /etc/os-release || true
+================================================================================
+PRETTY_NAME="Ubuntu 26.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+VERSION="26.04 (Resolute Raccoon)"
+VERSION_CODENAME=resolute
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=resolute
+LOGO=ubuntu-logo
+
+================================================================================
+Mounted filesystems, human-readable
+Command: df -hT
+================================================================================
+Filesystem                        Type      Size  Used Avail Use% Mounted on
+tmpfs                             tmpfs     6.2G  2.1M  6.2G   1% /run
+/dev/mapper/ubuntu--vg-ubuntu--lv ext4      466G   13G  434G   3% /
+tmpfs                             tmpfs      16G     0   16G   0% /dev/shm
+efivarfs                          efivarfs  246K   38K  204K  16% /sys/firmware/efi/efivars
+tmpfs                             tmpfs      16G  228K   16G   1% /tmp
+/dev/nvme0n1p2                    ext4      2.0G  184M  1.7G  11% /boot
+/dev/nvme0n1p1                    vfat      1.1G  6.4M  1.1G   1% /boot/efi
+none                              tmpfs     1.0M     0  1.0M   0% /run/credentials/getty@tty1.service
+tmpfs                             tmpfs     3.1G   24K  3.1G   1% /run/user/1000
+none                              tmpfs     1.0M     0  1.0M   0% /run/credentials/systemd-resolved.service
+none                              tmpfs     1.0M     0  1.0M   0% /run/credentials/systemd-networkd.service
+none                              tmpfs     1.0M     0  1.0M   0% /run/credentials/systemd-journald.service
+
+================================================================================
+Mounted filesystems, inode usage
+Command: df -ihT
+================================================================================
+Filesystem                        Type     Inodes IUsed IFree IUse% Mounted on
+tmpfs                             tmpfs      800K  1.4K  799K    1% /run
+/dev/mapper/ubuntu--vg-ubuntu--lv ext4        30M  211K   30M    1% /
+tmpfs                             tmpfs      3.9M     1  3.9M    1% /dev/shm
+efivarfs                          efivarfs      0     0     0     - /sys/firmware/efi/efivars
+tmpfs                             tmpfs      1.0M    26  1.0M    1% /tmp
+/dev/nvme0n1p2                    ext4       128K   338  128K    1% /boot
+/dev/nvme0n1p1                    vfat          0     0     0     - /boot/efi
+none                              tmpfs      1.0K     1  1023    1% /run/credentials/getty@tty1.service
+tmpfs                             tmpfs      783K    49  783K    1% /run/user/1000
+none                              tmpfs      1.0K     1  1023    1% /run/credentials/systemd-resolved.service
+none                              tmpfs      1.0K     1  1023    1% /run/credentials/systemd-networkd.service
+none                              tmpfs      1.0K     1  1023    1% /run/credentials/systemd-journald.service
+
+================================================================================
+Block devices with filesystems
+Command: lsblk -o NAME,PATH,MAJ:MIN,RM,SIZE,RO,TYPE,FSTYPE,FSVER,LABEL,UUID,PARTUUID,MOUNTPOINTS
+================================================================================
+NAME                      PATH                              MAJ:MIN RM   SIZE RO TYPE FSTYPE      FSVER    LABEL UUID                                   PARTUUID                             MOUNTPOINTS
+nvme0n1                   /dev/nvme0n1                      259:0    0 476.9G  0 disk                                                                                                        
+├─nvme0n1p1               /dev/nvme0n1p1                    259:1    0     1G  0 part vfat        FAT32          5B56-7EB1                              9732d1f5-1280-4491-9ae1-3a8aebc90d8a /boot/efi
+├─nvme0n1p2               /dev/nvme0n1p2                    259:2    0     2G  0 part ext4        1.0            8f5fb92b-3c81-4014-a0e7-4053fdee642c   e305bdc6-c67e-401a-9d1f-372db6a1f748 /boot
+└─nvme0n1p3               /dev/nvme0n1p3                    259:3    0 473.9G  0 part LVM2_member LVM2 001       uk5o4z-zFjc-3yjj-civ1-030N-ytlc-3YWm9h e42387c4-94b3-4846-b918-ec2ddc11918c 
+  └─ubuntu--vg-ubuntu--lv /dev/mapper/ubuntu--vg-ubuntu--lv 252:0    0 473.9G  0 lvm  ext4        1.0            32ed0c25-4e36-441b-8618-036574891376                                        /
+
+================================================================================
+Block device topology
+Command: lsblk -t
+================================================================================
+NAME                      ALIGNMENT MIN-IO OPT-IO PHY-SEC LOG-SEC ROTA SCHED RQ-SIZE  RA WSAME
+nvme0n1                           0    512      0     512     512    0 none     1023 128    0B
+├─nvme0n1p1                       0    512      0     512     512    0 none     1023 128    0B
+├─nvme0n1p2                       0    512      0     512     512    0 none     1023 128    0B
+└─nvme0n1p3                       0    512      0     512     512    0 none     1023 128    0B
+  └─ubuntu--vg-ubuntu--lv         0    512      0     512     512    0               128    0B
+
+================================================================================
+Findmnt tree
+Command: findmnt -R
+================================================================================
+TARGET                                        SOURCE                            FSTYPE      OPTIONS
+/                                             /dev/mapper/ubuntu--vg-ubuntu--lv ext4        rw,relatime
+├─/run                                        tmpfs                             tmpfs       rw,nosuid,nodev,size=6406908k,nr_inodes=819200,mode=755,inode64
+│ ├─/run/credentials/systemd-journald.service none                              tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+│ ├─/run/credentials/systemd-networkd.service none                              tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+│ ├─/run/user/1000                            tmpfs                             tmpfs       rw,nosuid,nodev,relatime,size=3203452k,nr_inodes=800863,mode=700,uid=1000,gid=1000,inode64
+│ ├─/run/credentials/getty@tty1.service       none                              tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+│ └─/run/credentials/systemd-resolved.service none                              tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+├─/tmp                                        tmpfs                             tmpfs       rw,nosuid,nodev,size=16017264k,nr_inodes=1048576,inode64,usrquota
+├─/dev                                        devtmpfs                          devtmpfs    rw,nosuid,size=15930744k,nr_inodes=3982686,mode=755,inode64
+│ ├─/dev/mqueue                               mqueue                            mqueue      rw,nosuid,nodev,noexec,relatime
+│ ├─/dev/hugepages                            hugetlbfs                         hugetlbfs   rw,nosuid,nodev,relatime,pagesize=2M
+│ ├─/dev/shm                                  tmpfs                             tmpfs       rw,nosuid,nodev,inode64,usrquota
+│ └─/dev/pts                                  devpts                            devpts      rw,nosuid,noexec,relatime,gid=5,mode=600,ptmxmode=000
+├─/sys                                        sysfs                             sysfs       rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/kernel/debug                         debugfs                           debugfs     rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/kernel/tracing                       tracefs                           tracefs     rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/fs/fuse/connections                  fusectl                           fusectl     rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/kernel/security                      securityfs                        securityfs  rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/fs/cgroup                            cgroup2                           cgroup2     rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot,memory_hugetlb_accounting
+│ ├─/sys/fs/pstore                            none                              pstore      rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/firmware/efi/efivars                 efivarfs                          efivarfs    rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/fs/bpf                               bpf                               bpf         rw,nosuid,nodev,noexec,relatime,mode=700
+│ └─/sys/kernel/config                        configfs                          configfs    rw,nosuid,nodev,noexec,relatime
+├─/boot                                       /dev/nvme0n1p2                    ext4        rw,relatime
+│ └─/boot/efi                                 /dev/nvme0n1p1                    vfat        rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro
+└─/proc                                       proc                              proc        rw,nosuid,nodev,noexec,relatime
+  └─/proc/sys/fs/binfmt_misc                  systemd-1                         autofs      rw,relatime,fd=34,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=12329
+    └─/proc/sys/fs/binfmt_misc                binfmt_misc                       binfmt_misc rw,nosuid,nodev,noexec,relatime
+
+================================================================================
+Findmnt raw source/target/fstype/options
+Command: findmnt -rno SOURCE,TARGET,FSTYPE,OPTIONS
+================================================================================
+tmpfs /run tmpfs rw,nosuid,nodev,size=6406908k,nr_inodes=819200,mode=755,inode64
+/dev/mapper/ubuntu--vg-ubuntu--lv / ext4 rw,relatime
+devtmpfs /dev devtmpfs rw,nosuid,size=15930744k,nr_inodes=3982686,mode=755,inode64
+tmpfs /dev/shm tmpfs rw,nosuid,nodev,inode64,usrquota
+devpts /dev/pts devpts rw,nosuid,noexec,relatime,gid=5,mode=600,ptmxmode=000
+sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime
+securityfs /sys/kernel/security securityfs rw,nosuid,nodev,noexec,relatime
+cgroup2 /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot,memory_hugetlb_accounting
+none /sys/fs/pstore pstore rw,nosuid,nodev,noexec,relatime
+efivarfs /sys/firmware/efi/efivars efivarfs rw,nosuid,nodev,noexec,relatime
+bpf /sys/fs/bpf bpf rw,nosuid,nodev,noexec,relatime,mode=700
+configfs /sys/kernel/config configfs rw,nosuid,nodev,noexec,relatime
+proc /proc proc rw,nosuid,nodev,noexec,relatime
+systemd-1 /proc/sys/fs/binfmt_misc autofs rw,relatime,fd=34,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=12329
+mqueue /dev/mqueue mqueue rw,nosuid,nodev,noexec,relatime
+debugfs /sys/kernel/debug debugfs rw,nosuid,nodev,noexec,relatime
+hugetlbfs /dev/hugepages hugetlbfs rw,nosuid,nodev,relatime,pagesize=2M
+tracefs /sys/kernel/tracing tracefs rw,nosuid,nodev,noexec,relatime
+fusectl /sys/fs/fuse/connections fusectl rw,nosuid,nodev,noexec,relatime
+tmpfs /tmp tmpfs rw,nosuid,nodev,size=16017264k,nr_inodes=1048576,inode64,usrquota
+/dev/nvme0n1p2 /boot ext4 rw,relatime
+/dev/nvme0n1p1 /boot/efi vfat rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro
+binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc rw,nosuid,nodev,noexec,relatime
+none /run/credentials/getty@tty1.service tmpfs ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+tmpfs /run/user/1000 tmpfs rw,nosuid,nodev,relatime,size=3203452k,nr_inodes=800863,mode=700,uid=1000,gid=1000,inode64
+none /run/credentials/systemd-resolved.service tmpfs ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+none /run/credentials/systemd-networkd.service tmpfs ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+none /run/credentials/systemd-journald.service tmpfs ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+
+================================================================================
+blkid
+Command: sudo blkid
+================================================================================
+/dev/mapper/ubuntu--vg-ubuntu--lv: UUID="32ed0c25-4e36-441b-8618-036574891376" BLOCK_SIZE="4096" TYPE="ext4"
+/dev/nvme0n1p3: UUID="uk5o4z-zFjc-3yjj-civ1-030N-ytlc-3YWm9h" TYPE="LVM2_member" PARTUUID="e42387c4-94b3-4846-b918-ec2ddc11918c"
+/dev/nvme0n1p2: UUID="8f5fb92b-3c81-4014-a0e7-4053fdee642c" BLOCK_SIZE="4096" TYPE="ext4" PARTUUID="e305bdc6-c67e-401a-9d1f-372db6a1f748"
+/dev/nvme0n1p1: UUID="5B56-7EB1" BLOCK_SIZE="512" TYPE="vfat" PARTUUID="9732d1f5-1280-4491-9ae1-3a8aebc90d8a"
+
+================================================================================
+fdisk partition table
+Command: sudo fdisk -l
+================================================================================
+Disk /dev/nvme0n1: 476.94 GiB, 512110190592 bytes, 1000215216 sectors
+Disk model: SKHynix_HFS512GDE9X081N                 
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: gpt
+Disk identifier: 1992A494-797E-4B2D-A571-2DD386EC47C1
+
+Device           Start        End   Sectors   Size Type
+/dev/nvme0n1p1    2048    2203647   2201600     1G EFI System
+/dev/nvme0n1p2 2203648    6397951   4194304     2G Linux filesystem
+/dev/nvme0n1p3 6397952 1000212479 993814528 473.9G Linux filesystem
+
+
+Disk /dev/mapper/ubuntu--vg-ubuntu--lv: 473.89 GiB, 508831989760 bytes, 993812480 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+
+================================================================================
+parted machine-readable disk layout
+Command: sudo parted -lm
+================================================================================
+BYT;
+/dev/mapper/ubuntu--vg-ubuntu--lv:509GB:dm:512:512:loop:Linux device-mapper (linear):;
+1:0.00B:509GB:509GB:ext4::;
+
+BYT;
+/dev/nvme0n1:512GB:nvme:512:512:gpt:SKHynix_HFS512GDE9X081N:;
+1:1049kB:1128MB:1127MB:fat32::boot, esp;
+2:1128MB:3276MB:2147MB:ext4::;
+3:3276MB:512GB:509GB:::;
+
+
+================================================================================
+LVM physical volumes
+Command: sudo pvs -o+pv_used,pv_free,vg_uuid,pv_uuid
+================================================================================
+  PV             VG        Fmt  Attr PSize    PFree Used     PFree VG UUID                                PV UUID                               
+  /dev/nvme0n1p3 ubuntu-vg lvm2 a--  <473.89g    0  <473.89g    0  hHBRM4-7irN-ec1G-aXeP-ty2Y-k2MX-SQdDHO uk5o4z-zFjc-3yjj-civ1-030N-ytlc-3YWm9h
+
+================================================================================
+LVM volume groups
+Command: sudo vgs -o+vg_uuid,vg_size,vg_free,vg_extent_size,vg_extent_count,vg_free_count
+================================================================================
+  VG        #PV #LV #SN Attr   VSize    VFree VG UUID                                VSize    VFree Ext   #Ext   Free
+  ubuntu-vg   1   1   0 wz--n- <473.89g    0  hHBRM4-7irN-ec1G-aXeP-ty2Y-k2MX-SQdDHO <473.89g    0  4.00m 121315    0
+
+================================================================================
+LVM logical volumes
+Command: sudo lvs -a -o+devices,segtype,lv_size,data_percent,metadata_percent,lv_uuid
+================================================================================
+  LV        VG        Attr       LSize    Pool Origin Data%  Meta%  Move Log Cpy%Sync Convert Devices           Type   LSize    Data%  Meta%  LV UUID                               
+  ubuntu-lv ubuntu-vg -wi-ao---- <473.89g                                                     /dev/nvme0n1p3(0) linear <473.89g               BOuthD-FqmP-zJE6-cy4a-dZv7-Zp8b-wPXBCm
+
+================================================================================
+LVM full PV display
+Command: sudo pvdisplay -m
+================================================================================
+  --- Physical volume ---
+  PV Name               /dev/nvme0n1p3
+  VG Name               ubuntu-vg
+  PV Size               <473.89 GiB / not usable 0   
+  Allocatable           yes (but full)
+  PE Size               4.00 MiB
+  Total PE              121315
+  Free PE               0
+  Allocated PE          121315
+  PV UUID               uk5o4z-zFjc-3yjj-civ1-030N-ytlc-3YWm9h
+   
+  --- Physical Segments ---
+  Physical extent 0 to 121314:
+    Logical volume	/dev/ubuntu-vg/ubuntu-lv
+    Logical extents	0 to 121314
+   
+
+================================================================================
+LVM full VG display
+Command: sudo vgdisplay
+================================================================================
+  --- Volume group ---
+  VG Name               ubuntu-vg
+  System ID             
+  Format                lvm2
+  Metadata Areas        1
+  Metadata Sequence No  3
+  VG Access             read/write
+  VG Status             resizable
+  MAX LV                0
+  Cur LV                1
+  Open LV               1
+  Max PV                0
+  Cur PV                1
+  Act PV                1
+  VG Size               <473.89 GiB
+  PE Size               4.00 MiB
+  Total PE              121315
+  Alloc PE / Size       121315 / <473.89 GiB
+  Free  PE / Size       0 / 0   
+  VG UUID               hHBRM4-7irN-ec1G-aXeP-ty2Y-k2MX-SQdDHO
+   
+
+================================================================================
+LVM full LV display
+Command: sudo lvdisplay -m
+================================================================================
+  --- Logical volume ---
+  LV Path                /dev/ubuntu-vg/ubuntu-lv
+  LV Name                ubuntu-lv
+  VG Name                ubuntu-vg
+  LV UUID                BOuthD-FqmP-zJE6-cy4a-dZv7-Zp8b-wPXBCm
+  LV Write Access        read/write
+  LV Creation host, time ubuntu-server, 2026-07-04 04:02:05 +0000
+  LV Status              available
+  # open                 1
+  LV Size                <473.89 GiB
+  Current LE             121315
+  Segments               1
+  Allocation             inherit
+  Read ahead sectors     auto
+  - currently set to     256
+  Block device           252:0
+   
+  --- Segments ---
+  Logical extents 0 to 121314:
+    Type		linear
+    Physical volume	/dev/nvme0n1p3
+    Physical extents	0 to 121314
+   
+   
+
+================================================================================
+Filesystem usage summary for root
+Command: df -hT / && findmnt /
+================================================================================
+Filesystem                        Type  Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-ubuntu--lv ext4  466G   13G  434G   3% /
+TARGET SOURCE                            FSTYPE OPTIONS
+/      /dev/mapper/ubuntu--vg-ubuntu--lv ext4   rw,relatime
+
+================================================================================
+Boot entries/mounts
+Command: df -hT /boot /boot/efi 2>/dev/null || true; findmnt /boot /boot/efi 2>/dev/null || true
+================================================================================
+Filesystem     Type  Size  Used Avail Use% Mounted on
+/dev/nvme0n1p2 ext4  2.0G  184M  1.7G  11% /boot
+/dev/nvme0n1p1 vfat  1.1G  6.4M  1.1G   1% /boot/efi
+
+================================================================================
+fstab
+Command: test -r /etc/fstab && cat /etc/fstab || true
+================================================================================
+# /etc/fstab: static file system information.
+#
+# Use 'blkid' to print the universally unique identifier for a
+# device; this may be used with UUID= as a more robust way to name devices
+# that works even if disks are added and removed. See fstab(5).
+#
+# <file system> <mount point>   <type>  <options>       <dump>  <pass>
+# / was on /dev/ubuntu-vg/ubuntu-lv during curtin installation
+/dev/disk/by-id/dm-uuid-LVM-hHBRM47irNec1GaXePty2Yk2MXSQdDHOBOuthDFqmPzJE6cy4adZv7Zp8bwPXBCm / ext4 defaults 0 1
+# /boot was on /dev/nvme0n1p2 during curtin installation
+/dev/disk/by-uuid/8f5fb92b-3c81-4014-a0e7-4053fdee642c /boot ext4 defaults 0 1
+# /boot/efi was on /dev/nvme0n1p1 during curtin installation
+/dev/disk/by-uuid/5B56-7EB1 /boot/efi vfat defaults 0 1
+/swap.img	none	swap	sw	0	0
+
+================================================================================
+Swap
+Command: swapon --show --bytes; test -r /proc/swaps && cat /proc/swaps || true
+================================================================================
+NAME      TYPE       SIZE USED PRIO
+/swap.img file 8589930496    0   -1
+Filename				Type		Size		Used		Priority
+/swap.img                               file		8388604		0		-1
+
+================================================================================
+Quick interpretation hints
+================================================================================
+- Compare disk/partition size from lsblk/fdisk with LV size from lvs.
+- If a large partition is TYPE=lvm and VG Free is large in vgs, the space is free inside LVM.
+- To inspect without modifying anything, this script only runs read-only/reporting commands.
