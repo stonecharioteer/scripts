@@ -26,6 +26,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 
 ### System Configuration
 - **[set-locale.sh](docs/set-locale.md)** - Configure en_US.UTF-8 locale with cleanup options for unused locales
+- **[laptop/x13-flow](laptop/x13-flow/README.md)** - ASUS X13 Flow screen and health helper scripts used by distributed-dotfiles
 
 ## 🎯 Quick Start Examples
 
@@ -77,6 +78,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | simple-notify | `curl` |
 | power-monitor | `duckdb`, `ping`, `arp`, `jq`, `gum` |
 | set-locale | `locale-gen`, `sudo` access |
+| laptop/x13-flow | `gum`, `uv`, `systemctl`, distributed-dotfiles laptop-health role |
 
 ## 🏗️ Installation
 
