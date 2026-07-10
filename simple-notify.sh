@@ -16,6 +16,7 @@ Send a Simplepush notification as JSON.
 OPTIONS:
     -h, --help              Show this help message
     -q, --quiet             Suppress API response output
+    -t, --title TITLE       Optional notification title
     -u, --url URL           Override the Simplepush endpoint
 
 ENVIRONMENT:
@@ -23,14 +24,14 @@ ENVIRONMENT:
 
 EXAMPLES:
     $(basename "$0") "Build finished"
-    $(basename "$0") Deploy completed successfully
-    echo "Long job is done" | $(basename "$0")
+    $(basename "$0") --title "Deploy" "Completed successfully"
+    echo "Long job is done" | $(basename "$0") --title "Batch job"
 
 FISH SETUP:
     set -Ux SIMPLE_PUSH_KEY your-simplepush-key
 
 PAYLOAD:
-    {"key":"<SIMPLE_PUSH_KEY>","msg":"<message>"}
+    {"key":"<SIMPLE_PUSH_KEY>","title":"<optional-title>","msg":"<message>"}
 EOF
 }
 
@@ -64,6 +65,7 @@ json_escape() {
 main() {
     local quiet=false
     local endpoint="$DEFAULT_ENDPOINT"
+    local title=""
     local message=""
     local key="${SIMPLE_PUSH_KEY:-}"
     local payload
@@ -78,6 +80,11 @@ main() {
             -q|--quiet)
                 quiet=true
                 shift
+                ;;
+            -t|--title)
+                [[ $# -ge 2 ]] || error "Missing value for $1"
+                title="$2"
+                shift 2
                 ;;
             -u|--url)
                 [[ $# -ge 2 ]] || error "Missing value for $1"
@@ -115,9 +122,16 @@ main() {
         error "Message cannot be empty"
     fi
 
-    payload=$(printf '{"key":"%s","msg":"%s"}' \
-        "$(json_escape "$key")" \
-        "$(json_escape "$message")")
+    if [[ -n "$title" ]]; then
+        payload=$(printf '{"key":"%s","title":"%s","msg":"%s"}' \
+            "$(json_escape "$key")" \
+            "$(json_escape "$title")" \
+            "$(json_escape "$message")")
+    else
+        payload=$(printf '{"key":"%s","msg":"%s"}' \
+            "$(json_escape "$key")" \
+            "$(json_escape "$message")")
+    fi
 
     response=$(curl \
         --silent \
