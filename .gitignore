@@ -8,6 +8,7 @@ myClippings.txt
 clippings.json
 highlight-manager-broken.sh
 .ai-usage-cache/
+ai-usage.html
 
 *.json
 *.tsv
