@@ -14,3 +14,8 @@ ai-usage.hosts
 *.json
 *.tsv
 *.csv
+ai-usage.json
+ai-usage.csv
+ai-usage-daily.json
+ai-usage-daily.csv
+ai-usage-infographic.png
