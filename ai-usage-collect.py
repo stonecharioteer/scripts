@@ -835,8 +835,17 @@ h1 { margin: 0; font-size: clamp(38px, 7vw, 92px); line-height: .88; letter-spac
 .panel { border-top: 1px solid var(--rule-strong); padding-top: 14px; min-width: 0; }
 .flow-panel { overflow: hidden; padding-bottom: 8px; }
 .panel h2 { margin: 0 0 14px; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
-.chart { display: flex; align-items: flex-end; gap: 3px; height: 230px; padding: 10px 0 0; border-bottom: 1px solid var(--rule); }
-.day { flex: 1 1 3px; min-width: 3px; height: 100%; display: flex; flex-direction: column-reverse; justify-content: flex-start; opacity: .94; }
+.chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.chart-head h2 { margin: 0; }
+.scale-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; letter-spacing: .12em; }
+.scale-control select { color: var(--ink); background: var(--paper); border: 1px solid var(--rule); padding: 6px 8px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.chart-body { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: start; }
+.chart-stack { min-width: 0; }
+.y-axis { position: relative; height: 230px; border-bottom: 1px solid transparent; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.y-tick { position: absolute; right: 0; transform: translateY(50%); white-space: nowrap; }
+.chart { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 230px; padding: 10px 0 0; border-bottom: 1px solid var(--rule); }
+.gridline { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(237,228,209,.08); z-index: 0; }
+.day { position: relative; z-index: 1; flex: 1 1 3px; min-width: 3px; height: 100%; display: flex; flex-direction: column-reverse; justify-content: flex-start; opacity: .94; }
 .day:hover { outline: 1px solid var(--gold); outline-offset: 2px; opacity: 1; }
 .seg.in { background: var(--in); } .seg.out { background: var(--out); } .seg.cw { background: var(--cw); } .seg.cr { background: var(--cr); } .seg.rz { background: var(--rz); }
 .chart-axis { position: relative; height: 22px; margin: 8px 0 12px; overflow: hidden; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -907,9 +916,17 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   </section>
   <section class="grid">
     <div class="panel flow-panel">
-      <h2>Daily Token Flow</h2>
-      <div id="chart" class="chart" aria-label="Daily token bars"></div>
-      <div id="chartAxis" class="chart-axis" aria-label="Daily token date axis"></div>
+      <div class="chart-head">
+        <h2>Daily Token Flow</h2>
+        <label class="scale-control">Y scale <select id="tokenScale"><option value="log" selected>Log</option><option value="linear">Linear</option></select></label>
+      </div>
+      <div class="chart-body">
+        <div id="yAxis" class="y-axis" aria-label="Daily token y axis"></div>
+        <div class="chart-stack">
+          <div id="chart" class="chart" aria-label="Daily token bars"></div>
+          <div id="chartAxis" class="chart-axis" aria-label="Daily token date axis"></div>
+        </div>
+      </div>
       <div class="legend">
         <span><i class="swatch" style="background:var(--in)"></i>input</span>
         <span><i class="swatch" style="background:var(--out)"></i>output</span>
@@ -961,7 +978,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 const D = JSON.parse(document.getElementById('usage-data').textContent);
 const fields = ['input_tokens','output_tokens','cache_creation_tokens','cache_read_tokens','reasoning_tokens'];
 const segClass = ['in','out','cw','cr','rz'];
-let state = { from: null, to: null, preset: 'all', hosts: ['all'] };
+let state = { from: null, to: null, preset: 'all', hosts: ['all'], tokenScale: 'log' };
 function fmt(n) { n = Number(n || 0); if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return (n/1e3).toFixed(0)+'k'; return String(Math.round(n)); }
 function usd(n) { return '$' + Number(n || 0).toFixed(2); }
 function pct(n) { return Number(n || 0).toFixed(1) + '%'; }
@@ -1009,6 +1026,39 @@ function dateLabel(date) {
   const parsed = new Date(date + 'T00:00:00Z');
   return parsed.toLocaleDateString('en', {month: 'short', day: 'numeric', timeZone: 'UTC'});
 }
+function scaleRatio(value, max) {
+  value = Number(value || 0); max = Number(max || 0);
+  if (!value || !max) return 0;
+  if (state.tokenScale === 'log') return Math.log10(value + 1) / Math.log10(max + 1);
+  return value / max;
+}
+function yTicks(max) {
+  max = Number(max || 0);
+  if (!max) return [0];
+  if (state.tokenScale === 'log') {
+    const ticks = [0];
+    let value = 1;
+    while (value < max) { ticks.push(value); value *= 10; }
+    if (!ticks.includes(max)) ticks.push(max);
+    return ticks.filter((value, index, arr) => index === 0 || value === max || value >= max / 100000 || arr.length <= 7).slice(-7);
+  }
+  return [0, .25, .5, .75, 1].map(ratio => Math.round(max * ratio));
+}
+function renderYAxis(max) {
+  const axis = clear('yAxis');
+  const chart = document.getElementById('chart');
+  chart.querySelectorAll('.gridline').forEach(line => line.remove());
+  yTicks(max).forEach(value => {
+    const ratio = scaleRatio(value, max);
+    const bottom = Math.max(0, Math.min(100, ratio * 100));
+    const tick = node('span', 'y-tick', fmt(value));
+    tick.style.bottom = bottom + '%';
+    axis.append(tick);
+    const line = node('i', 'gridline');
+    line.style.bottom = bottom + '%';
+    chart.append(line);
+  });
+}
 function renderChartAxis(days) {
   const axis = clear('chartAxis');
   if (!days.length) return;
@@ -1026,10 +1076,19 @@ function renderChartAxis(days) {
 function renderChart(days) {
   const root = clear('chart');
   const max = Math.max(1, ...days.map(d => Number(d.total_tokens || 0)));
+  renderYAxis(max);
   days.forEach(d => {
+    const total = Number(d.total_tokens || 0);
+    const scaledTotal = scaleRatio(total, max) * 100;
     const day = node('div','day');
-    day.title = `${d.date} · ${fmt(d.total_tokens)} tokens · ${usd(d.cost_usd)}`;
-    fields.forEach((f, idx) => { const seg = node('div', 'seg ' + segClass[idx]); const height = Math.max(0, Number(d[f] || 0) / max * 100); seg.style.height = height ? Math.max(.8, height) + '%' : '0'; day.append(seg); });
+    day.title = `${d.date} · ${fmt(total)} tokens · ${usd(d.cost_usd)} · ${state.tokenScale} scale`;
+    fields.forEach((f, idx) => {
+      const seg = node('div', 'seg ' + segClass[idx]);
+      const share = total ? Number(d[f] || 0) / total : 0;
+      const height = scaledTotal * share;
+      seg.style.height = height ? Math.max(.8, height) + '%' : '0';
+      day.append(seg);
+    });
     root.append(day);
   });
   renderChartAxis(days);
@@ -1194,6 +1253,10 @@ function applyHostFilter() {
   }
   renderAll();
 }
+function applyTokenScale() {
+  state.tokenScale = document.getElementById('tokenScale').value || 'log';
+  renderAll();
+}
 function renderAll() {
   const derived = derive(selectedRows());
   renderStats(derived.summary); renderChart(derived.days); renderCost(derived.days); renderServices(derived.services); renderTokenmax(derived.days, derived.summary); renderHeatmaps(derived.days); renderModels(derived.models); renderHosts();
@@ -1205,6 +1268,7 @@ document.querySelectorAll('#presets button').forEach(button => button.addEventLi
 document.getElementById('fromDate').addEventListener('change', applyCustomRange);
 document.getElementById('toDate').addEventListener('change', applyCustomRange);
 document.getElementById('hostFilter').addEventListener('change', applyHostFilter);
+document.getElementById('tokenScale').addEventListener('change', applyTokenScale);
 populateHostFilter();
 applyRange('all');
 </script>
