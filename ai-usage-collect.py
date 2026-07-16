@@ -839,23 +839,16 @@ h1 { margin: 0; font-size: clamp(38px, 7vw, 92px); line-height: .88; letter-spac
 .chart-head h2 { margin: 0; }
 .scale-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; letter-spacing: .12em; }
 .scale-control select { color: var(--ink); background: var(--paper); border: 1px solid var(--rule); padding: 6px 8px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.chart-body { display: grid; grid-template-columns: 58px minmax(0, 1fr) 58px; gap: 10px; align-items: start; }
-.chart-stack { min-width: 0; }
-.y-axis { position: relative; height: 230px; border-bottom: 1px solid transparent; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.y-tick { position: absolute; right: 0; transform: translateY(50%); white-space: nowrap; }
-.cost-y-axis .y-tick { left: 0; right: auto; color: var(--gold); }
-.chart { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 230px; padding: 10px 0 0; border-bottom: 1px solid var(--rule); }
-.gridline { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(237,228,209,.08); z-index: 0; }
-.cost-overlay { position: absolute; inset: 10px 0 0 0; width: 100%; height: calc(100% - 10px); z-index: 3; pointer-events: none; overflow: visible; }
-.cost-overlay path { fill: none; stroke: var(--gold); stroke-width: 3; vector-effect: non-scaling-stroke; }
-.cost-overlay circle { fill: var(--paper); stroke: var(--gold); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.day { position: relative; z-index: 1; flex: 1 1 3px; min-width: 3px; height: 100%; display: flex; flex-direction: column-reverse; justify-content: flex-start; opacity: .94; }
-.day:hover { outline: 1px solid var(--gold); outline-offset: 2px; opacity: 1; }
-.seg.in { background: var(--in); } .seg.out { background: var(--out); } .seg.cw { background: var(--cw); } .seg.cr { background: var(--cr); } .seg.rz { background: var(--rz); }
-.chart-axis { position: relative; height: 22px; margin: 8px 0 12px; overflow: hidden; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.axis-tick { position: absolute; transform: translateX(-50%); white-space: nowrap; }
-.axis-tick:first-child { transform: translateX(0); }
-.axis-tick:last-child { transform: translateX(-100%); }
+.chart-body { min-width: 0; }
+.chart { height: 320px; border-bottom: 1px solid var(--rule); }
+.chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.chart .axis path, .chart .axis line { stroke: var(--rule-strong); }
+.chart .axis text { fill: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.chart .cost-axis text { fill: var(--gold); }
+.chart .grid line { stroke: rgba(237,228,209,.08); }
+.chart .grid path { display: none; }
+.chart .cost-line { fill: none; stroke: var(--gold); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.chart .cost-dot { fill: var(--paper); stroke: var(--gold); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
 .swatch.line { height: 2px; width: 18px; vertical-align: 3px; }
@@ -925,12 +918,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         <label class="scale-control">Y scale <select id="tokenScale"><option value="log" selected>Log</option><option value="linear">Linear</option></select></label>
       </div>
       <div class="chart-body">
-        <div id="yAxis" class="y-axis" aria-label="Daily token y axis"></div>
-        <div class="chart-stack">
-          <div id="chart" class="chart" aria-label="Daily token bars and reported cost curve"></div>
-          <div id="chartAxis" class="chart-axis" aria-label="Daily token date axis"></div>
-        </div>
-        <div id="costYAxis" class="y-axis cost-y-axis" aria-label="Daily cost y axis"></div>
+        <div id="chart" class="chart" aria-label="Daily token bars and reported cost curve"></div>
       </div>
       <div class="legend">
         <span><i class="swatch" style="background:var(--in)"></i>input</span>
@@ -978,6 +966,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   </section>
 </main>
 <div id="hovercard" class="hovercard"></div>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 <script id="usage-data" type="application/json">__DATA__</script>
 <script>
 const D = JSON.parse(document.getElementById('usage-data').textContent);
@@ -1038,101 +1027,134 @@ function dateLabel(date) {
   const parsed = new Date(date + 'T00:00:00Z');
   return parsed.toLocaleDateString('en', {month: 'short', day: 'numeric', timeZone: 'UTC'});
 }
-function scaleRatio(value, max) {
-  value = Number(value || 0); max = Number(max || 0);
-  if (!value || !max) return 0;
-  if (state.tokenScale === 'log') return Math.log10(value + 1) / Math.log10(max + 1);
-  return value / max;
+function d3TokenScale(max, height) {
+  if (state.tokenScale === 'log') return d3.scaleLog().domain([1, Math.max(1, max)]).range([height, 0]).clamp(true);
+  return d3.scaleLinear().domain([0, Math.max(1, max)]).nice().range([height, 0]);
 }
-function yTicks(max) {
+function d3Value(scale, value, height) {
+  value = Number(value || 0);
+  if (!value) return height;
+  if (state.tokenScale === 'log') return scale(Math.max(1, value));
+  return scale(value);
+}
+function d3Ticks(max) {
   max = Number(max || 0);
   if (!max) return [0];
-  if (state.tokenScale === 'log') {
-    const ticks = [0];
-    let value = 1;
-    while (value < max) { ticks.push(value); value *= 10; }
-    if (!ticks.includes(max)) ticks.push(max);
-    return ticks.filter((value, index, arr) => index === 0 || value === max || value >= max / 100000 || arr.length <= 7).slice(-7);
-  }
-  return [0, .25, .5, .75, 1].map(ratio => Math.round(max * ratio));
-}
-function renderYAxis(max, axisId, formatter, drawGrid) {
-  const axis = clear(axisId);
-  const chart = document.getElementById('chart');
-  if (drawGrid) chart.querySelectorAll('.gridline').forEach(line => line.remove());
-  yTicks(max).forEach(value => {
-    const ratio = scaleRatio(value, max);
-    const bottom = Math.max(0, Math.min(100, ratio * 100));
-    const tick = node('span', 'y-tick', formatter(value));
-    tick.style.bottom = bottom + '%';
-    axis.append(tick);
-    if (drawGrid) {
-      const line = node('i', 'gridline');
-      line.style.bottom = bottom + '%';
-      chart.append(line);
-    }
-  });
-}
-function renderChartAxis(days) {
-  const axis = clear('chartAxis');
-  if (!days.length) return;
-  const count = Math.min(7, days.length);
-  const used = new Set();
-  for (let i = 0; i < count; i += 1) {
-    const index = count === 1 ? 0 : Math.round(i * (days.length - 1) / (count - 1));
-    if (used.has(index)) continue;
-    used.add(index);
-    const tick = node('span', 'axis-tick', dateLabel(days[index].date));
-    tick.style.left = days.length === 1 ? '0%' : `${index / (days.length - 1) * 100}%`;
-    axis.append(tick);
-  }
-}
-function renderCostOverlay(root, days, maxCost) {
-  renderYAxis(maxCost, 'costYAxis', usd, false);
-  if (!days.length || !maxCost) return;
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('class', 'cost-overlay');
-  svg.setAttribute('viewBox', '0 0 1000 100');
-  svg.setAttribute('preserveAspectRatio', 'none');
-  const points = days.map((d, i) => {
-    const x = days.length === 1 ? 0 : i * (1000 / (days.length - 1));
-    const y = 100 - (scaleRatio(Number(d.cost_usd || 0), maxCost) * 100);
-    return [x, y];
-  });
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', points.map(([x, y], index) => `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' '));
-  svg.append(path);
-  points.forEach(([x, y], index) => {
-    if (days.length > 120 && index % Math.ceil(days.length / 60) !== 0) return;
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', x.toFixed(1));
-    circle.setAttribute('cy', y.toFixed(1));
-    circle.setAttribute('r', '2.3');
-    svg.append(circle);
-  });
-  root.append(svg);
+  if (state.tokenScale !== 'log') return null;
+  const ticks = [];
+  let value = 1;
+  while (value < max) { ticks.push(value); value *= 10; }
+  ticks.push(max);
+  return ticks.filter((value, index, arr) => index === arr.length - 1 || value >= max / 100000).slice(-7);
 }
 function renderChart(days) {
-  const root = clear('chart');
-  const maxTokens = Math.max(1, ...days.map(d => Number(d.total_tokens || 0)));
-  const maxCost = Math.max(0, ...days.map(d => Number(d.cost_usd || 0)));
-  renderYAxis(maxTokens, 'yAxis', fmt, true);
-  days.forEach(d => {
-    const total = Number(d.total_tokens || 0);
-    const scaledTotal = scaleRatio(total, maxTokens) * 100;
-    const day = node('div','day');
-    day.title = `${d.date} · ${fmt(total)} tokens · ${usd(d.cost_usd)} · ${state.tokenScale} scale`;
-    fields.forEach((f, idx) => {
-      const seg = node('div', 'seg ' + segClass[idx]);
-      const share = total ? Number(d[f] || 0) / total : 0;
-      const height = scaledTotal * share;
-      seg.style.height = height ? Math.max(.8, height) + '%' : '0';
-      day.append(seg);
+  const rootNode = clear('chart');
+  if (!window.d3) {
+    rootNode.append(node('div', 'note', 'D3 failed to load; chart unavailable.'));
+    return;
+  }
+  const root = d3.select(rootNode);
+  const width = Math.max(760, rootNode.clientWidth || 900);
+  const height = 320;
+  const margin = {top: 18, right: 72, bottom: 38, left: 70};
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const maxTokens = d3.max(days, d => Number(d.total_tokens || 0)) || 1;
+  const maxCost = d3.max(days, d => Number(d.cost_usd || 0)) || 0;
+  const x = d3.scaleBand().domain(days.map(d => d.date)).range([margin.left, margin.left + innerWidth]).paddingInner(0.18).paddingOuter(0.05);
+  const yTokens = d3TokenScale(maxTokens, innerHeight);
+  const yCost = d3TokenScale(maxCost || 1, innerHeight);
+  const tokenValue = value => margin.top + d3Value(yTokens, value, innerHeight);
+  const costValue = value => margin.top + d3Value(yCost, value, innerHeight);
+  const barBase = margin.top + innerHeight;
+  const svg = root.append('svg').attr('viewBox', `0 0 ${width} ${height}`).attr('role', 'img').attr('aria-label', 'Daily token bars with reported cost curve');
+  const tokenTicks = d3Ticks(maxTokens);
+  const costTicks = d3Ticks(maxCost || 1);
+  const xTickCount = Math.min(7, days.length);
+  const xTickValues = [];
+  for (let i = 0; i < xTickCount; i += 1) {
+    const index = xTickCount === 1 ? 0 : Math.round(i * (days.length - 1) / (xTickCount - 1));
+    if (days[index] && !xTickValues.includes(days[index].date)) xTickValues.push(days[index].date);
+  }
+  svg.append('g')
+    .attr('class', 'grid')
+    .attr('transform', `translate(${margin.left},${margin.top})`)
+    .call(d3.axisLeft(yTokens).tickValues(tokenTicks).ticks(5, '~s').tickSize(-innerWidth).tickFormat(''));
+  svg.append('g')
+    .attr('class', 'axis token-axis')
+    .attr('transform', `translate(${margin.left},${margin.top})`)
+    .call(d3.axisLeft(yTokens).tickValues(tokenTicks).ticks(5, '~s').tickFormat(d => fmt(d)));
+  svg.append('g')
+    .attr('class', 'axis cost-axis')
+    .attr('transform', `translate(${margin.left + innerWidth},${margin.top})`)
+    .call(d3.axisRight(yCost).tickValues(costTicks).ticks(5, '~s').tickFormat(d => usd(d)));
+  svg.append('g')
+    .attr('class', 'axis x-axis')
+    .attr('transform', `translate(0,${barBase})`)
+    .call(d3.axisBottom(x).tickValues(xTickValues).tickFormat(dateLabel));
+  const bars = svg.append('g').attr('class', 'token-bars');
+  days.forEach(day => {
+    const total = Number(day.total_tokens || 0);
+    let cursor = barBase;
+    fields.forEach((field, idx) => {
+      const value = Number(day[field] || 0);
+      const share = total ? value / total : 0;
+      const totalHeight = barBase - tokenValue(total);
+      const segmentHeight = totalHeight * share;
+      cursor -= segmentHeight;
+      bars.append('rect')
+        .attr('x', x(day.date))
+        .attr('y', cursor)
+        .attr('width', Math.max(1, x.bandwidth()))
+        .attr('height', Math.max(0, segmentHeight))
+        .attr('fill', `var(--${segClass[idx]})`)
+        .append('title').text(`${day.date} · ${fmt(value)} ${field.replaceAll('_', ' ')} · ${fmt(total)} total · ${usd(day.cost_usd)}`);
     });
-    root.append(day);
   });
-  renderCostOverlay(root, days, maxCost);
-  renderChartAxis(days);
+  const line = d3.line()
+    .defined(d => Number(d.cost_usd || 0) > 0)
+    .x(d => (x(d.date) || margin.left) + x.bandwidth() / 2)
+    .y(d => costValue(Number(d.cost_usd || 0)));
+  svg.append('path').datum(days).attr('class', 'cost-line').attr('d', line);
+  const dotEvery = days.length > 120 ? Math.ceil(days.length / 60) : 1;
+  svg.append('g').selectAll('circle')
+    .data(days.filter((d, i) => Number(d.cost_usd || 0) > 0 && i % dotEvery === 0))
+    .join('circle')
+    .attr('class', 'cost-dot')
+    .attr('cx', d => (x(d.date) || margin.left) + x.bandwidth() / 2)
+    .attr('cy', d => costValue(Number(d.cost_usd || 0)))
+    .attr('r', 2.4)
+    .append('title').text(d => `${d.date} · ${usd(d.cost_usd)} reported cost · ${fmt(d.total_tokens)} tokens`);
+  const focus = svg.append('g').attr('class', 'chart-focus').style('display', 'none');
+  focus.append('line').attr('y1', margin.top).attr('y2', barBase).attr('stroke', 'var(--gold)').attr('stroke-width', 1).attr('stroke-dasharray', '3 3');
+  focus.append('circle').attr('r', 4).attr('fill', 'var(--paper)').attr('stroke', 'var(--gold)').attr('stroke-width', 2);
+  svg.append('rect')
+    .attr('x', margin.left)
+    .attr('y', margin.top)
+    .attr('width', innerWidth)
+    .attr('height', innerHeight)
+    .attr('fill', 'transparent')
+    .on('mouseenter', () => focus.style('display', null))
+    .on('mouseleave', () => { focus.style('display', 'none'); hideHover(); })
+    .on('mousemove', event => {
+      if (!days.length) return;
+      const [mx] = d3.pointer(event);
+      const step = innerWidth / Math.max(1, days.length);
+      const index = Math.max(0, Math.min(days.length - 1, Math.floor((mx - margin.left) / step)));
+      const day = days[index];
+      const cx = (x(day.date) || margin.left) + x.bandwidth() / 2;
+      const cy = Number(day.cost_usd || 0) ? costValue(Number(day.cost_usd || 0)) : tokenValue(Number(day.total_tokens || 0));
+      focus.select('line').attr('x1', cx).attr('x2', cx);
+      focus.select('circle').attr('cx', cx).attr('cy', cy);
+      showHover(event, [
+        day.date,
+        `${fmt(day.total_tokens)} total tokens`,
+        `${fmt(day.input_tokens)} in · ${fmt(day.output_tokens)} out`,
+        `${fmt((day.cache_creation_tokens || 0) + (day.cache_read_tokens || 0))} cache`,
+        `${usd(day.cost_usd)} reported cost`,
+        `${state.tokenScale} scale`,
+      ]);
+    });
 }
 function renderServices(services) {
   const palette = ['#d8a33d','#8fb8b6','#577f86','#7d6c9f','#d66b55','#77b77a','#ede4d1'];
