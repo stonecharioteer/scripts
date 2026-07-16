@@ -4,7 +4,7 @@ Collect AI coding-agent usage from local and SSH-reachable machines into JSON, C
 
 ## Why
 
-Usage lives in different places depending on the tool: Claude Code JSONL, Codex session files, pi session files, and opencode SQLite. This script normalizes those records without copying prompts, responses, tool arguments, auth files, or raw transcripts.
+Usage lives in ccusage-supported coding-agent history across tools. This script asks ccusage for unified daily usage and normalizes those records without copying prompts, responses, tool arguments, auth files, or raw transcripts.
 
 It keeps a per-host cache, so an offline host does not erase its last known usage.
 
@@ -12,7 +12,7 @@ It keeps a per-host cache, so an offline host does not erase its last known usag
 
 - `python3`
 - `ssh` for remote hosts
-- `ccusage` or `npx` for unified multi-agent usage and cost data. By default the script tries installed `ccusage`, then `npx --yes ccusage@latest`, and can fall back to local parsers with `--usage-source auto`.
+- `ccusage` or `npx` for unified multi-agent usage and cost data. By default the script tries `npx --yes ccusage@latest`, then installed `ccusage`.
 
 No Python packages are required.
 
@@ -48,8 +48,8 @@ Default outputs:
 # Keep hosts separate in the daily aggregate
 ./ai-usage-collect.py --daily-split-hosts
 
-# Avoid network calls and use local parsers only
-./ai-usage-collect.py --usage-source local --claude-cost-source raw
+# Avoid npx and use an installed ccusage binary only
+./ai-usage-collect.py --ccusage-runner ccusage
 
 # Skip the dashboard when only machine-readable data is needed
 ./ai-usage-collect.py --no-html
@@ -71,8 +71,9 @@ Daily aggregates and the HTML dashboard merge hosts and accounts by default so t
 The dashboard is a single file with embedded CSS, JavaScript, and aggregate data. It shows:
 
 - total, input, output, cache, cost, model count, and latest date
-- an All / 7D / 30D / 90D / 1Y / custom date selector
+- an All / 7D / 30D / 90D / 1Y / custom date selector plus a host filter defaulting to all hosts
 - daily token flow bars split by input/output/cache/reasoning
+- GitHub-style daily heatmaps for token volume and reported cost, with month markers and hover values
 - reported daily cost line
 - service/source mix, including Grok usage logged through pi
 - a Tokenmaxxing panel with peak day, average tokens/day, cache multiplier, and output share
@@ -83,17 +84,12 @@ The HTML embeds only aggregate dashboard data, not raw prompts, responses, tool 
 
 ## Sources
 
-| Source | Local data read | Notes |
-|--------|-----------------|-------|
-| Unified default | `ccusage daily --json --by-agent` | Primary source for all ccusage-supported coding agents and costs |
-| Claude Code fallback | `~/.claude/projects/**/*.jsonl`, `~/.claude/transcripts/*.jsonl`, or `ccusage daily --json` | Used when local mode/fallback is selected |
-| Codex fallback | `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/*.jsonl` | Uses latest `token_count` event per session |
-| pi fallback | `~/.pi/agent/sessions/**/*.jsonl` | Includes Grok when pi logs `provider=xai-*` and `model=grok-*` |
-| opencode fallback | `~/.local/share/opencode/opencode.db` | Reads session token and cost totals from a temporary SQLite backup |
+| Source | Command | Notes |
+|--------|---------|-------|
+| Unified default | `ccusage daily --json --by-agent` | Primary and only usage source for all ccusage-supported coding agents and costs |
+| Runner selection | `--ccusage-runner auto\|npx\|ccusage` | `auto` prefers `npx ccusage@latest`, then installed `ccusage` |
 
-The `source` column is the app that logged usage. The `service` column is inferred from provider/model names, so Grok used through pi appears as `source=pi` and `service=grok`.
-
-Use `--usage-source local` to skip ccusage entirely, or `--usage-source auto` to try ccusage first and fall back to local parsers if ccusage returns no rows.
+The `source` column is the app that logged usage according to ccusage. The `service` column is inferred from provider/model names, so Grok used through pi appears as `source=pi` and `service=grok`.
 
 ## Offline hosts
 
@@ -103,11 +99,4 @@ Hosts with no cache and no successful SSH connection are skipped with a warning.
 
 ## Cost semantics
 
-Costs are recorded when the local source reports them:
-
-- Claude Code: from `ccusage` when available.
-- pi: from the session usage object.
-- opencode: from the session table.
-- Codex native session files: token counts are available, but dollar cost is usually not present.
-
-For sources without cost data, `cost_usd` is `0` rather than an estimate.
+Costs are recorded exactly as reported by `ccusage daily --json --by-agent`. For ccusage-supported rows without cost data, `cost_usd` is `0` rather than an estimate.
