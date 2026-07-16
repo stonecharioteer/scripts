@@ -12,7 +12,7 @@ It keeps a per-host cache, so an offline host does not erase its last known usag
 
 - `python3`
 - `ssh` for remote hosts
-- `ccusage` or `npx` for Claude Code cost data. By default the script tries installed `ccusage`, then `npx --yes ccusage@latest`, then falls back to raw Claude JSONL tokens.
+- `ccusage` or `npx` for unified multi-agent usage and cost data. By default the script tries installed `ccusage`, then `npx --yes ccusage@latest`, and can fall back to local parsers with `--usage-source auto`.
 
 No Python packages are required.
 
@@ -48,8 +48,8 @@ Default outputs:
 # Keep hosts separate in the daily aggregate
 ./ai-usage-collect.py --daily-split-hosts
 
-# Avoid network calls for Claude Code and parse raw JSONL only
-./ai-usage-collect.py --claude-cost-source raw
+# Avoid network calls and use local parsers only
+./ai-usage-collect.py --usage-source local --claude-cost-source raw
 
 # Skip the dashboard when only machine-readable data is needed
 ./ai-usage-collect.py --no-html
@@ -71,9 +71,11 @@ Daily aggregates and the HTML dashboard merge hosts and accounts by default so t
 The dashboard is a single file with embedded CSS, JavaScript, and aggregate data. It shows:
 
 - total, input, output, cache, cost, model count, and latest date
+- an All / 7D / 30D / 90D / 1Y / custom date selector
 - daily token flow bars split by input/output/cache/reasoning
 - reported daily cost line
 - service/source mix, including Grok usage logged through pi
+- a Tokenmaxxing panel with peak day, average tokens/day, cache multiplier, and output share
 - top models by token volume
 - host cache status, including cached/offline hosts
 
@@ -83,12 +85,15 @@ The HTML embeds only aggregate dashboard data, not raw prompts, responses, tool 
 
 | Source | Local data read | Notes |
 |--------|-----------------|-------|
-| Claude Code | `~/.claude/projects/**/*.jsonl`, `~/.claude/transcripts/*.jsonl`, or `ccusage daily --json` | `ccusage` provides cost data when available |
-| Codex | `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/*.jsonl` | Uses latest `token_count` event per session |
-| pi | `~/.pi/agent/sessions/**/*.jsonl` | Includes Grok when pi logs `provider=xai-*` and `model=grok-*` |
-| opencode | `~/.local/share/opencode/opencode.db` | Reads session token and cost totals from a temporary SQLite backup |
+| Unified default | `ccusage daily --json --by-agent` | Primary source for all ccusage-supported coding agents and costs |
+| Claude Code fallback | `~/.claude/projects/**/*.jsonl`, `~/.claude/transcripts/*.jsonl`, or `ccusage daily --json` | Used when local mode/fallback is selected |
+| Codex fallback | `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/*.jsonl` | Uses latest `token_count` event per session |
+| pi fallback | `~/.pi/agent/sessions/**/*.jsonl` | Includes Grok when pi logs `provider=xai-*` and `model=grok-*` |
+| opencode fallback | `~/.local/share/opencode/opencode.db` | Reads session token and cost totals from a temporary SQLite backup |
 
 The `source` column is the app that logged usage. The `service` column is inferred from provider/model names, so Grok used through pi appears as `source=pi` and `service=grok`.
+
+Use `--usage-source local` to skip ccusage entirely, or `--usage-source auto` to try ccusage first and fall back to local parsers if ccusage returns no rows.
 
 ## Offline hosts
 

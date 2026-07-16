@@ -245,14 +245,15 @@ def collect_claude_raw(home: Path) -> list[dict[str, Any]]:
     return records
 
 
-def run_ccusage(mode: str, home: Path) -> dict[str, Any] | None:
+def run_ccusage(mode: str, home: Path, extra_args: list[str] | None = None) -> dict[str, Any] | None:
     if mode == "raw":
         return None
+    extra_args = extra_args or []
     command: list[str] | None = None
     if mode in {"auto", "ccusage"} and shutil.which("ccusage"):
-        command = ["ccusage", "daily", "--json"]
+        command = ["ccusage", "daily", "--json", *extra_args]
     elif mode in {"auto", "npx"} and shutil.which("npx"):
-        command = ["npx", "--yes", "ccusage@latest", "daily", "--json"]
+        command = ["npx", "--yes", "ccusage@latest", "daily", "--json", *extra_args]
     if command is None:
         return None
 
@@ -263,7 +264,7 @@ def run_ccusage(mode: str, home: Path) -> dict[str, Any] | None:
             command,
             text=True,
             capture_output=True,
-            timeout=90,
+            timeout=120,
             check=False,
             env=env,
         )
@@ -283,6 +284,10 @@ def run_ccusage(mode: str, home: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def ccusage_day(day: dict[str, Any]) -> str:
+    return str(day.get("date") or day.get("period") or "")
+
+
 def collect_claude_ccusage(home: Path, mode: str) -> list[dict[str, Any]]:
     payload = run_ccusage(mode, home)
     if payload is None:
@@ -295,7 +300,7 @@ def collect_claude_ccusage(home: Path, mode: str) -> list[dict[str, Any]]:
     for day in daily:
         if not isinstance(day, dict):
             continue
-        date = str(day.get("date") or "")
+        date = ccusage_day(day)
         if not date:
             continue
         timestamp = f"{date}T00:00:00Z"
@@ -344,6 +349,82 @@ def collect_claude(home: Path, cost_source: str = "auto") -> list[dict[str, Any]
         if records:
             return records
     return collect_claude_raw(home)
+
+
+def normalize_ccusage_agent(agent: str) -> str:
+    aliases = {
+        "claude": "claude_code",
+        "opencode": "opencode",
+        "codex": "codex",
+        "pi": "pi",
+    }
+    return aliases.get(agent, agent or "ccusage")
+
+
+def collect_ccusage_unified(home: Path, mode: str = "auto") -> list[dict[str, Any]]:
+    payload = run_ccusage(mode, home, ["--by-agent"])
+    if payload is None:
+        return []
+    daily = payload.get("daily")
+    if not isinstance(daily, list):
+        return []
+
+    records: list[dict[str, Any]] = []
+    for day in daily:
+        if not isinstance(day, dict):
+            continue
+        date = ccusage_day(day)
+        if not date:
+            continue
+        timestamp = f"{date}T00:00:00Z"
+        agents = day.get("agents")
+        if not isinstance(agents, list):
+            agents = [day]
+        for agent_row in agents:
+            if not isinstance(agent_row, dict):
+                continue
+            agent = str(agent_row.get("agent") or day.get("agent") or "ccusage")
+            source = normalize_ccusage_agent(agent)
+            breakdowns = agent_row.get("modelBreakdowns")
+            if isinstance(breakdowns, list) and breakdowns:
+                for breakdown in breakdowns:
+                    if not isinstance(breakdown, dict):
+                        continue
+                    model = str(breakdown.get("modelName") or "")
+                    records.append(
+                        new_record(
+                            source=source,
+                            timestamp=timestamp,
+                            session_id=f"ccusage:{agent}:{date}:{model}",
+                            provider=agent,
+                            model=model,
+                            input_tokens=as_int(breakdown.get("inputTokens")),
+                            output_tokens=as_int(breakdown.get("outputTokens")),
+                            cache_creation_tokens=as_int(breakdown.get("cacheCreationTokens")),
+                            cache_read_tokens=as_int(breakdown.get("cacheReadTokens")),
+                            total_tokens=as_int(breakdown.get("totalTokens")),
+                            cost_usd=as_float(breakdown.get("cost")),
+                            source_path="ccusage daily --json --by-agent",
+                        )
+                    )
+            else:
+                records.append(
+                    new_record(
+                        source=source,
+                        timestamp=timestamp,
+                        session_id=f"ccusage:{agent}:{date}",
+                        provider=agent,
+                        model=", ".join(str(model) for model in agent_row.get("modelsUsed", []) if model),
+                        input_tokens=as_int(agent_row.get("inputTokens")),
+                        output_tokens=as_int(agent_row.get("outputTokens")),
+                        cache_creation_tokens=as_int(agent_row.get("cacheCreationTokens")),
+                        cache_read_tokens=as_int(agent_row.get("cacheReadTokens")),
+                        total_tokens=as_int(agent_row.get("totalTokens")),
+                        cost_usd=as_float(agent_row.get("totalCost")),
+                        source_path="ccusage daily --json --by-agent",
+                    )
+                )
+    return records
 
 
 def collect_pi(home: Path) -> list[dict[str, Any]]:
@@ -520,10 +601,33 @@ def collect_opencode(home: Path) -> list[dict[str, Any]]:
     return records
 
 
-def collect_local(host_label: str = "", claude_cost_source: str = "auto") -> dict[str, Any]:
+def collect_local(
+    host_label: str = "", claude_cost_source: str = "auto", usage_source: str = "ccusage"
+) -> dict[str, Any]:
     home = Path.home()
     label = host_label or socket.gethostname().split(".", 1)[0]
     records = []
+
+    if usage_source in {"ccusage", "auto"}:
+        try:
+            records = collect_ccusage_unified(home, claude_cost_source)
+        except Exception as exc:  # noqa: BLE001 - ccusage failure should fall through to local parsers.
+            eprint(f"Warning: collect_ccusage_unified failed: {exc}")
+        if records or usage_source == "ccusage":
+            records.sort(key=lambda item: (item.get("timestamp") or "", item.get("source") or "", item.get("session_id") or ""))
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "host": label,
+                "collected_at": utc_now(),
+                "platform": {
+                    "hostname": socket.gethostname(),
+                    "system": platform.system(),
+                    "release": platform.release(),
+                },
+                "records": records,
+                "summary": summarize_records(records),
+            }
+
     collectors = (
         ("collect_claude", lambda: collect_claude(home, claude_cost_source)),
         ("collect_pi", lambda: collect_pi(home)),
@@ -634,7 +738,9 @@ def parse_host_arg(value: str) -> HostSpec:
     return HostSpec(label=value, target=value)
 
 
-def run_remote_collect(spec: HostSpec, timeout: int, claude_cost_source: str) -> tuple[dict[str, Any] | None, str]:
+def run_remote_collect(
+    spec: HostSpec, timeout: int, claude_cost_source: str, usage_source: str
+) -> tuple[dict[str, Any] | None, str]:
     script = Path(__file__).read_text(encoding="utf-8")
     command = [
         "ssh",
@@ -650,6 +756,8 @@ def run_remote_collect(spec: HostSpec, timeout: int, claude_cost_source: str) ->
         spec.label,
         "--claude-cost-source",
         claude_cost_source,
+        "--usage-source",
+        usage_source,
     ]
     try:
         completed = subprocess.run(
@@ -673,7 +781,7 @@ def run_remote_collect(spec: HostSpec, timeout: int, claude_cost_source: str) ->
 
 
 def collect_host(
-    spec: HostSpec, cache_dir: Path, timeout: int, claude_cost_source: str
+    spec: HostSpec, cache_dir: Path, timeout: int, claude_cost_source: str, usage_source: str
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     path = cache_path(cache_dir, spec.label)
     status = {
@@ -685,12 +793,12 @@ def collect_host(
     }
 
     if spec.is_local:
-        payload = collect_local(spec.label, claude_cost_source)
+        payload = collect_local(spec.label, claude_cost_source, usage_source)
         status["status"] = "updated"
         atomic_write_json(path, payload)
         return payload, status
 
-    payload, error = run_remote_collect(spec, timeout, claude_cost_source)
+    payload, error = run_remote_collect(spec, timeout, claude_cost_source, usage_source)
     if payload is not None:
         status["status"] = "updated"
         atomic_write_json(path, payload)
@@ -1009,12 +1117,36 @@ def dashboard_payload(combined: dict[str, Any], daily: list[dict[str, Any]]) -> 
         "accounts": len(accounts_seen),
     }
 
+    rows = []
+    for record in sorted(daily, key=lambda item: (item.get("date") or "", item.get("source") or "", item.get("model") or "")):
+        rows.append(
+            {
+                "date": str(record.get("date") or ""),
+                "source": str(record.get("source") or ""),
+                "service": str(record.get("service") or ""),
+                "provider": str(record.get("provider") or ""),
+                "model": str(record.get("model") or ""),
+                "hosts": str(record.get("hosts") or ""),
+                "accounts": str(record.get("accounts") or ""),
+                "records": as_int(record.get("records")),
+                "sessions": as_int(record.get("sessions")),
+                "input_tokens": as_int(record.get("input_tokens")),
+                "output_tokens": as_int(record.get("output_tokens")),
+                "cache_creation_tokens": as_int(record.get("cache_creation_tokens")),
+                "cache_read_tokens": as_int(record.get("cache_read_tokens")),
+                "reasoning_tokens": as_int(record.get("reasoning_tokens")),
+                "total_tokens": as_int(record.get("total_tokens")),
+                "cost_usd": round(as_float(record.get("cost_usd")), 6),
+            }
+        )
+
     return {
         "generated_at": combined.get("generated_at") or utc_now(),
         "summary": totals,
         "days": days,
         "models": models[:30],
         "services": services,
+        "rows": rows,
         "hosts": combined.get("statuses", []),
     }
 
@@ -1061,6 +1193,13 @@ h1 { margin: 0; font-size: clamp(38px, 7vw, 92px); line-height: .88; letter-spac
 .stat { padding: 18px 14px 16px; border-right: 1px solid var(--rule); min-width: 0; }
 .stat:last-child { border-right: 0; }
 .value { font: 29px/.95 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -.05em; white-space: nowrap; }
+.rangebar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.rangebar button, .rangebar input { color: var(--ink); background: transparent; border: 1px solid var(--rule); padding: 8px 10px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.rangebar button { cursor: pointer; text-transform: uppercase; letter-spacing: .08em; }
+.rangebar button.active, .rangebar button:hover, .rangebar input:focus { border-color: var(--gold); outline: 0; }
+.custom-range { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.range-readout { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin-left: 6px; }
 .grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 28px; margin-top: 30px; }
 .panel { border-top: 1px solid var(--rule-strong); padding-top: 14px; min-width: 0; }
 .panel h2 { margin: 0 0 14px; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
@@ -1075,6 +1214,11 @@ h1 { margin: 0; font-size: clamp(38px, 7vw, 92px); line-height: .88; letter-spac
 .servicebit { min-width: 2px; }
 .service-list { display: grid; gap: 8px; }
 .service-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
+.tokenmax { margin-top: 20px; border-top: 1px solid var(--rule); padding-top: 14px; }
+.tokenmax-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tokenmax-metric { border-left: 1px solid var(--rule); padding-left: 10px; }
+.tokenmax-metric strong { display: block; font: 22px/.95 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -.04em; }
+.tokenmax-line { margin-top: 12px; color: var(--gold); font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 table { width: 100%; border-collapse: collapse; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 th, td { padding: 10px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
 th { text-align: left; }
@@ -1085,7 +1229,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .host { border: 1px solid var(--rule); padding: 7px 9px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
 .host.updated .dot { color: var(--green); } .host.cached .dot { color: var(--gold); } .host.missing .dot { color: var(--red); }
 .note { color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 12px; }
-@media (max-width: 900px) { .mast, .grid { display: block; } .generated { text-align: left; margin-top: 14px; } .stats { grid-template-columns: repeat(2, 1fr); } .stat:nth-child(2n) { border-right: 0; } }
+@media (max-width: 900px) { .mast, .grid, .rangebar { display: block; } .custom-range { margin-top: 12px; } .generated { text-align: left; margin-top: 14px; } .stats { grid-template-columns: repeat(2, 1fr); } .stat:nth-child(2n) { border-right: 0; } }
 </style>
 </head>
 <body>
@@ -1095,6 +1239,20 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     <div class="generated"><div class="label">Generated</div><div id="generated"></div><p class="note">Accounts are merged by default. Cost is reported only when the source provides it.</p></div>
   </header>
   <section class="stats" id="stats" aria-label="Summary statistics"></section>
+  <section class="rangebar" aria-label="Date range selector">
+    <div class="presets" id="presets">
+      <button type="button" data-range="all" class="active">All</button>
+      <button type="button" data-range="7">7D</button>
+      <button type="button" data-range="30">30D</button>
+      <button type="button" data-range="90">90D</button>
+      <button type="button" data-range="365">1Y</button>
+    </div>
+    <div class="custom-range">
+      <span class="label">From</span><input id="fromDate" type="date">
+      <span class="label">To</span><input id="toDate" type="date">
+      <span class="range-readout" id="rangeReadout"></span>
+    </div>
+  </section>
   <section class="grid">
     <div class="panel">
       <h2>Daily Token Flow</h2>
@@ -1112,6 +1270,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       <h2>Service Mix</h2>
       <div id="servicebar" class="servicebar"></div>
       <div id="services" class="service-list"></div>
+      <div class="tokenmax">
+        <h2>Tokenmaxxing</h2>
+        <div id="tokenmax" class="tokenmax-grid"></div>
+        <div id="tokenmaxLine" class="tokenmax-line"></div>
+      </div>
       <p class="note">The service field is inferred from provider/model names, so Grok used through pi is counted as Grok while retaining source=pi.</p>
     </aside>
   </section>
@@ -1132,53 +1295,90 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 const D = JSON.parse(document.getElementById('usage-data').textContent);
 const fields = ['input_tokens','output_tokens','cache_creation_tokens','cache_read_tokens','reasoning_tokens'];
 const segClass = ['in','out','cw','cr','rz'];
+let state = { from: null, to: null, preset: 'all' };
 function fmt(n) { n = Number(n || 0); if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return (n/1e3).toFixed(0)+'k'; return String(Math.round(n)); }
 function usd(n) { return '$' + Number(n || 0).toFixed(2); }
+function pct(n) { return Number(n || 0).toFixed(1) + '%'; }
 function node(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; }
-function renderStats() {
+function clear(id) { const el = document.getElementById(id); while (el.firstChild) el.removeChild(el.firstChild); return el; }
+function addTotals(target, row) { fields.concat(['total_tokens']).forEach(f => target[f] = Number(target[f] || 0) + Number(row[f] || 0)); target.cost_usd = Number(target.cost_usd || 0) + Number(row.cost_usd || 0); target.records = Number(target.records || 0) + Number(row.records || 0); target.sessions = Number(target.sessions || 0) + Number(row.sessions || 0); }
+function dateAdd(date, delta) { const d = new Date(date + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + delta); return d.toISOString().slice(0,10); }
+function availableDates() { return [...new Set((D.rows || []).map(r => r.date).filter(Boolean))].sort(); }
+function selectedRows() { return (D.rows || []).filter(r => (!state.from || r.date >= state.from) && (!state.to || r.date <= state.to)); }
+function derive(rows) {
+  const daysMap = new Map(), modelsMap = new Map(), servicesMap = new Map();
+  rows.forEach(row => {
+    if (!row.date) return;
+    if (!daysMap.has(row.date)) daysMap.set(row.date, {date: row.date, records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
+    addTotals(daysMap.get(row.date), row);
+    const modelKey = [row.service, row.provider, row.model].join('\u0000');
+    if (!modelsMap.has(modelKey)) modelsMap.set(modelKey, {service: row.service, provider: row.provider, model: row.model, days: new Set(), sources: new Set(), hosts: new Set(), accounts: new Set(), records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
+    const model = modelsMap.get(modelKey); addTotals(model, row); model.days.add(row.date); model.sources.add(row.source); (row.hosts || '').split(',').filter(Boolean).forEach(v => model.hosts.add(v)); (row.accounts || '').split(',').filter(Boolean).forEach(v => model.accounts.add(v));
+    const serviceKey = [row.source, row.service].join('\u0000');
+    if (!servicesMap.has(serviceKey)) servicesMap.set(serviceKey, {source: row.source, service: row.service, records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
+    addTotals(servicesMap.get(serviceKey), row);
+  });
+  const days = [...daysMap.values()].sort((a,b) => a.date.localeCompare(b.date));
+  const models = [...modelsMap.values()].map(m => ({...m, days: m.days.size, sources: [...m.sources].sort(), hosts: [...m.hosts].sort(), accounts: [...m.accounts].sort()})).sort((a,b) => b.total_tokens - a.total_tokens);
+  const services = [...servicesMap.values()].sort((a,b) => b.total_tokens - a.total_tokens);
+  const summary = {records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0, active_models: models.length, first_date: days[0]?.date || '', latest_date: days.at(-1)?.date || ''};
+  days.forEach(day => addTotals(summary, day));
+  return {days, models, services, summary};
+}
+function renderStats(summary) {
   document.getElementById('generated').textContent = D.generated_at || 'unknown';
   const stats = [
-    ['total', fmt(D.summary.total_tokens)], ['input', fmt(D.summary.input_tokens)], ['output', fmt(D.summary.output_tokens)],
-    ['cache read', fmt(D.summary.cache_read_tokens)], ['cache write', fmt(D.summary.cache_creation_tokens)], ['cost', usd(D.summary.cost_usd)],
-    ['models', fmt(D.summary.active_models)], ['latest', D.summary.latest_date || 'n/a']
+    ['total', fmt(summary.total_tokens)], ['input', fmt(summary.input_tokens)], ['output', fmt(summary.output_tokens)],
+    ['cache read', fmt(summary.cache_read_tokens)], ['cache write', fmt(summary.cache_creation_tokens)], ['cost', usd(summary.cost_usd)],
+    ['models', fmt(summary.active_models)], ['latest', summary.latest_date || 'n/a']
   ];
-  const root = document.getElementById('stats');
+  const root = clear('stats');
   stats.forEach(([label, value]) => { const box = node('div','stat'); box.append(node('div','label',label)); box.append(node('div','value',value)); root.append(box); });
 }
-function renderChart() {
-  const root = document.getElementById('chart');
-  const days = D.days || [];
+function renderChart(days) {
+  const root = clear('chart');
   const max = Math.max(1, ...days.map(d => Number(d.total_tokens || 0)));
   days.forEach(d => {
     const day = node('div','day');
     day.title = `${d.date} · ${fmt(d.total_tokens)} tokens · ${usd(d.cost_usd)}`;
-    fields.forEach((f, idx) => { const seg = node('div', 'seg ' + segClass[idx]); const pct = Math.max(0, Number(d[f] || 0) / max * 100); seg.style.height = pct ? Math.max(.8, pct) + '%' : '0'; day.append(seg); });
+    fields.forEach((f, idx) => { const seg = node('div', 'seg ' + segClass[idx]); const height = Math.max(0, Number(d[f] || 0) / max * 100); seg.style.height = height ? Math.max(.8, height) + '%' : '0'; day.append(seg); });
     root.append(day);
   });
 }
-function renderCost() {
-  const svg = document.getElementById('costline');
-  const days = D.days || [];
+function renderCost(days) {
+  const svg = clear('costline');
   const max = Math.max(0, ...days.map(d => Number(d.cost_usd || 0)));
   if (!days.length || !max) { const t = document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('x','0'); t.setAttribute('y','38'); t.setAttribute('fill','#9d927f'); t.textContent = 'No reported cost data'; svg.append(t); return; }
   const points = days.map((d, i) => { const x = days.length === 1 ? 0 : i * (1000 / (days.length - 1)); const y = 62 - (Number(d.cost_usd || 0) / max * 54); return `${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
   const line = document.createElementNS('http://www.w3.org/2000/svg','polyline'); line.setAttribute('points', points); line.setAttribute('fill','none'); line.setAttribute('stroke','#d8a33d'); line.setAttribute('stroke-width','3'); line.setAttribute('vector-effect','non-scaling-stroke'); svg.append(line);
   const t = document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('x','1000'); t.setAttribute('y','12'); t.setAttribute('text-anchor','end'); t.setAttribute('fill','#d8a33d'); t.textContent = 'max ' + usd(max); svg.append(t);
 }
-function renderServices() {
+function renderServices(services) {
   const palette = ['#d8a33d','#8fb8b6','#577f86','#7d6c9f','#d66b55','#77b77a','#ede4d1'];
-  const total = Math.max(1, D.services.reduce((sum, row) => sum + Number(row.total_tokens || 0), 0));
-  const bar = document.getElementById('servicebar');
-  const list = document.getElementById('services');
-  D.services.forEach((row, idx) => {
+  const total = Math.max(1, services.reduce((sum, row) => sum + Number(row.total_tokens || 0), 0));
+  const bar = clear('servicebar');
+  const list = clear('services');
+  services.forEach((row, idx) => {
     const color = palette[idx % palette.length];
     const bit = node('div','servicebit'); bit.style.width = (Number(row.total_tokens || 0) / total * 100) + '%'; bit.style.background = color; bit.title = `${row.source}/${row.service} · ${fmt(row.total_tokens)}`; bar.append(bit);
     const item = node('div','service-row'); const left = node('span','',`${row.source}/${row.service}`); left.style.color = color; item.append(left); item.append(node('span','',`${fmt(row.total_tokens)} · ${usd(row.cost_usd)}`)); list.append(item);
   });
 }
-function renderModels() {
-  const body = document.getElementById('models');
-  D.models.forEach(row => {
+function renderTokenmax(days, summary) {
+  const root = clear('tokenmax');
+  const peak = days.reduce((best, day) => Number(day.total_tokens || 0) > Number(best.total_tokens || 0) ? day : best, {date:'n/a', total_tokens:0});
+  const avg = days.length ? summary.total_tokens / days.length : 0;
+  const cache = Number(summary.cache_creation_tokens || 0) + Number(summary.cache_read_tokens || 0);
+  const direct = Number(summary.input_tokens || 0) + Number(summary.output_tokens || 0);
+  const cacheMult = direct ? cache / direct : 0;
+  const outputShare = summary.total_tokens ? summary.output_tokens / summary.total_tokens * 100 : 0;
+  [['peak day', `${fmt(peak.total_tokens)} on ${peak.date}`], ['avg/day', fmt(avg)], ['cache multiplier', cacheMult.toFixed(1)+'×'], ['output share', pct(outputShare)]].forEach(([label, value]) => { const box = node('div','tokenmax-metric'); box.append(node('div','label',label)); box.append(node('strong','',value)); root.append(box); });
+  const line = document.getElementById('tokenmaxLine');
+  line.textContent = summary.total_tokens ? `You are tokenmaxxing at ${fmt(avg)} tokens/day in this range, with ${fmt(cache)} cache tokens doing the heavy lifting.` : 'No tokens in this range.';
+}
+function renderModels(models) {
+  const body = clear('models');
+  models.slice(0, 30).forEach(row => {
     const tr = document.createElement('tr');
     const name = document.createElement('td');
     name.title = `sources: ${(row.sources || []).join(', ')}; hosts: ${(row.hosts || []).join(', ')}; accounts: ${(row.accounts || []).join(', ')}`;
@@ -1190,10 +1390,38 @@ function renderModels() {
   });
 }
 function renderHosts() {
-  const root = document.getElementById('hosts');
+  const root = clear('hosts');
   (D.hosts || []).forEach(row => { const status = row.status || 'missing'; const item = node('div','host '+status); item.title = row.message || row.cache || ''; item.append(node('span','dot', status === 'updated' ? '● ' : status === 'cached' ? '◐ ' : '○ ')); item.append(document.createTextNode(`${row.host || 'host'} · ${status}`)); root.append(item); });
 }
-renderStats(); renderChart(); renderCost(); renderServices(); renderModels(); renderHosts();
+function applyRange(preset) {
+  const dates = availableDates();
+  if (!dates.length) return renderAll();
+  const latest = dates.at(-1);
+  state.preset = preset;
+  if (preset === 'all') { state.from = dates[0]; state.to = latest; }
+  else { state.to = latest; state.from = dateAdd(latest, -Number(preset) + 1); }
+  document.getElementById('fromDate').value = state.from;
+  document.getElementById('toDate').value = state.to;
+  document.querySelectorAll('#presets button').forEach(b => b.classList.toggle('active', b.dataset.range === preset));
+  renderAll();
+}
+function applyCustomRange() {
+  state.from = document.getElementById('fromDate').value || null;
+  state.to = document.getElementById('toDate').value || null;
+  state.preset = 'custom';
+  document.querySelectorAll('#presets button').forEach(b => b.classList.remove('active'));
+  renderAll();
+}
+function renderAll() {
+  const derived = derive(selectedRows());
+  renderStats(derived.summary); renderChart(derived.days); renderCost(derived.days); renderServices(derived.services); renderTokenmax(derived.days, derived.summary); renderModels(derived.models); renderHosts();
+  const readout = document.getElementById('rangeReadout');
+  readout.textContent = `${derived.days.length} days · ${derived.summary.first_date || 'n/a'} to ${derived.summary.latest_date || 'n/a'}`;
+}
+document.querySelectorAll('#presets button').forEach(button => button.addEventListener('click', () => applyRange(button.dataset.range)));
+document.getElementById('fromDate').addEventListener('change', applyCustomRange);
+document.getElementById('toDate').addEventListener('change', applyCustomRange);
+applyRange('all');
 </script>
 </body>
 </html>
@@ -1252,7 +1480,13 @@ def parse_args() -> argparse.Namespace:
         "--claude-cost-source",
         choices=("auto", "raw", "ccusage", "npx"),
         default="auto",
-        help="Claude Code source: auto uses installed ccusage or npx ccusage@latest, raw parses JSONL only.",
+        help="ccusage runner: auto uses installed ccusage or npx ccusage@latest, raw uses local parsers only.",
+    )
+    parser.add_argument(
+        "--usage-source",
+        choices=("ccusage", "auto", "local"),
+        default="ccusage",
+        help="Primary usage collector. ccusage uses unified ccusage data; auto falls back to local parsers; local skips ccusage.",
     )
     parser.add_argument("--json-only", action="store_true", help="Do not write CSV output.")
     parser.add_argument("--collect-local", action="store_true", help=argparse.SUPPRESS)
@@ -1263,7 +1497,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.collect_local:
-        print(json.dumps(collect_local(args.host_label, args.claude_cost_source), sort_keys=True))
+        print(json.dumps(collect_local(args.host_label, args.claude_cost_source, args.usage_source), sort_keys=True))
         return 0
 
     specs = default_specs(not args.no_local)
@@ -1283,7 +1517,7 @@ def main() -> int:
     host_payloads: list[tuple[HostSpec, dict[str, Any], bool]] = []
     statuses: list[dict[str, Any]] = []
     for spec in specs:
-        payload, status = collect_host(spec, args.cache_dir, args.ssh_timeout, args.claude_cost_source)
+        payload, status = collect_host(spec, args.cache_dir, args.ssh_timeout, args.claude_cost_source, args.usage_source)
         statuses.append(status)
         if payload is None:
             eprint(f"{spec.label}: no data ({status.get('message')})")
