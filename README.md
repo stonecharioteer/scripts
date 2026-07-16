@@ -14,7 +14,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[audible-download.sh](docs/audible-download.md)** - Bulk download audiobooks from Audible with filtering options
 
 ### Development Tools
-- **[ai-usage-collect.py](docs/ai-usage-collect.md)** - Collect Claude Code, Codex, pi, opencode, and Grok usage from local/SSH hosts into cached JSON and CSV stats
+- **[ai-usage-collect.py](docs/ai-usage-collect.md)** - Collect Claude Code, Codex, pi, opencode, and Grok usage from local/SSH hosts into cached JSON/CSV stats and a static HTML dashboard
 - **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, check runner/machine info, reviews, and bot activity (CodeRabbit, etc.)
 - **[env-diff.sh](docs/env-diff.md)** - Compare `.env` files in a gum table while redacting token-like values
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
@@ -48,7 +48,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ./check-pr.sh --concise  # Show only summary and items needing attention
 ./check-pr.sh /path/to/repo  # Check a PR from another repository directory
 
-# Collect AI coding-agent usage into raw and daily JSON/CSV stats
+# Collect AI coding-agent usage into raw/daily JSON/CSV stats and ai-usage.html
 ./ai-usage-collect.py
 ./ai-usage-collect.py --host eqr5 --host macbook=stone@macbook.local
 

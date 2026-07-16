@@ -1,6 +1,6 @@
 # ai-usage-collect.py
 
-Collect AI coding-agent usage from local and SSH-reachable machines into JSON and CSV files.
+Collect AI coding-agent usage from local and SSH-reachable machines into JSON, CSV, and a static HTML dashboard.
 
 ## Why
 
@@ -30,6 +30,7 @@ Default outputs:
 | `ai-usage.csv` | CSV version of raw records |
 | `ai-usage-daily.json` | Daily per-model aggregates |
 | `ai-usage-daily.csv` | CSV version of daily aggregates |
+| `ai-usage.html` | Self-contained static dashboard refreshed on each run |
 | `.ai-usage-cache/<host>.json` | Last successful snapshot for each host |
 
 ## Examples
@@ -49,6 +50,9 @@ Default outputs:
 
 # Avoid network calls for Claude Code and parse raw JSONL only
 ./ai-usage-collect.py --claude-cost-source raw
+
+# Skip the dashboard when only machine-readable data is needed
+./ai-usage-collect.py --no-html
 ```
 
 Inventory format:
@@ -60,7 +64,20 @@ eqr5 stone@eqr5.local account=personal
 work-mac stone@work-mac.local account=work
 ```
 
-Daily aggregates merge hosts and accounts by default so the stats read as one person's usage. Raw records still retain host and account labels for auditing. Use `--daily-split-hosts` or `--daily-split-accounts` when you want those dimensions separated.
+Daily aggregates and the HTML dashboard merge hosts and accounts by default so the stats read as one person's usage. Raw records still retain host and account labels for auditing. Use `--daily-split-hosts` or `--daily-split-accounts` when you want those dimensions separated.
+
+## HTML dashboard
+
+The dashboard is a single file with embedded CSS, JavaScript, and aggregate data. It shows:
+
+- total, input, output, cache, cost, model count, and latest date
+- daily token flow bars split by input/output/cache/reasoning
+- reported daily cost line
+- service/source mix, including Grok usage logged through pi
+- top models by token volume
+- host cache status, including cached/offline hosts
+
+The HTML embeds only aggregate dashboard data, not raw prompts, responses, tool calls, or per-session records.
 
 ## Sources
 

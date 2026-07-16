@@ -11,6 +11,7 @@ import argparse
 import csv
 import datetime as dt
 import glob
+import html
 import json
 import os
 import platform
@@ -32,6 +33,7 @@ DEFAULT_JSON = "ai-usage.json"
 DEFAULT_CSV = "ai-usage.csv"
 DEFAULT_DAILY_JSON = "ai-usage-daily.json"
 DEFAULT_DAILY_CSV = "ai-usage-daily.csv"
+DEFAULT_HTML = "ai-usage.html"
 
 
 @dataclass
@@ -862,6 +864,352 @@ def write_daily_csv(path: Path, records: list[dict[str, Any]]) -> None:
             writer.writerow(record)
 
 
+def json_for_script(payload: Any) -> str:
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True).replace("</", "<\\/")
+
+
+def html_escape(value: Any) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def add_to_bucket(bucket: dict[str, Any], record: dict[str, Any]) -> None:
+    bucket["records"] = as_int(bucket.get("records")) + as_int(record.get("records", 1))
+    bucket["sessions"] = as_int(bucket.get("sessions")) + as_int(record.get("sessions", 0))
+    for field in (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_tokens",
+        "cache_read_tokens",
+        "reasoning_tokens",
+        "total_tokens",
+    ):
+        bucket[field] = as_int(bucket.get(field)) + as_int(record.get(field))
+    bucket["cost_usd"] = as_float(bucket.get("cost_usd")) + as_float(record.get("cost_usd"))
+
+
+def dashboard_payload(combined: dict[str, Any], daily: list[dict[str, Any]]) -> dict[str, Any]:
+    day_buckets: dict[str, dict[str, Any]] = {}
+    model_buckets: dict[tuple[str, str, str], dict[str, Any]] = {}
+    service_buckets: dict[tuple[str, str], dict[str, Any]] = {}
+    hosts_seen: set[str] = set()
+    accounts_seen: set[str] = set()
+
+    for record in daily:
+        date = str(record.get("date") or "")
+        if date:
+            day_bucket = day_buckets.setdefault(
+                date,
+                {
+                    "date": date,
+                    "records": 0,
+                    "sessions": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "reasoning_tokens": 0,
+                    "total_tokens": 0,
+                    "cost_usd": 0.0,
+                },
+            )
+            add_to_bucket(day_bucket, record)
+
+        service = str(record.get("service") or record.get("source") or "unknown")
+        source = str(record.get("source") or "unknown")
+        provider = str(record.get("provider") or "")
+        model = str(record.get("model") or "unknown")
+        model_key = (service, provider, model)
+        model_bucket = model_buckets.setdefault(
+            model_key,
+            {
+                "service": service,
+                "provider": provider,
+                "model": model,
+                "records": 0,
+                "sessions": 0,
+                "days": set(),
+                "sources": set(),
+                "hosts": set(),
+                "accounts": set(),
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+            },
+        )
+        add_to_bucket(model_bucket, record)
+        if date:
+            model_bucket["days"].add(date)
+        model_bucket["sources"].add(source)
+
+        for host in str(record.get("hosts") or record.get("host") or "").split(","):
+            if host and host != "all":
+                model_bucket["hosts"].add(host)
+                hosts_seen.add(host)
+        for account in str(record.get("accounts") or record.get("account_label") or "").split(","):
+            if account and account != "all":
+                model_bucket["accounts"].add(account)
+                accounts_seen.add(account)
+
+        service_key = (source, service)
+        service_bucket = service_buckets.setdefault(
+            service_key,
+            {
+                "source": source,
+                "service": service,
+                "records": 0,
+                "sessions": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+            },
+        )
+        add_to_bucket(service_bucket, record)
+
+    days = sorted(day_buckets.values(), key=lambda item: item["date"])
+    models = []
+    for bucket in model_buckets.values():
+        item = dict(bucket)
+        item["days"] = len(bucket["days"])
+        item["sources"] = sorted(bucket["sources"])
+        item["hosts"] = sorted(bucket["hosts"])
+        item["accounts"] = sorted(bucket["accounts"])
+        item["cost_usd"] = round(item["cost_usd"], 6)
+        models.append(item)
+    models.sort(key=lambda item: item["total_tokens"], reverse=True)
+
+    services = []
+    for bucket in service_buckets.values():
+        item = dict(bucket)
+        item["cost_usd"] = round(item["cost_usd"], 6)
+        services.append(item)
+    services.sort(key=lambda item: item["total_tokens"], reverse=True)
+
+    totals = {
+        "records": sum(as_int(day.get("records")) for day in days),
+        "sessions": sum(as_int(day.get("sessions")) for day in days),
+        "input_tokens": sum(as_int(day.get("input_tokens")) for day in days),
+        "output_tokens": sum(as_int(day.get("output_tokens")) for day in days),
+        "cache_creation_tokens": sum(as_int(day.get("cache_creation_tokens")) for day in days),
+        "cache_read_tokens": sum(as_int(day.get("cache_read_tokens")) for day in days),
+        "reasoning_tokens": sum(as_int(day.get("reasoning_tokens")) for day in days),
+        "total_tokens": sum(as_int(day.get("total_tokens")) for day in days),
+        "cost_usd": round(sum(as_float(day.get("cost_usd")) for day in days), 6),
+        "active_models": len(models),
+        "latest_date": days[-1]["date"] if days else "",
+        "first_date": days[0]["date"] if days else "",
+        "hosts": len(hosts_seen),
+        "accounts": len(accounts_seen),
+    }
+
+    return {
+        "generated_at": combined.get("generated_at") or utc_now(),
+        "summary": totals,
+        "days": days,
+        "models": models[:30],
+        "services": services,
+        "hosts": combined.get("statuses", []),
+    }
+
+
+HTML_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Usage Ledger</title>
+<style>
+:root {
+  --paper: #15130f;
+  --ink: #ede4d1;
+  --muted: #9d927f;
+  --rule: #343025;
+  --rule-strong: #5a4d35;
+  --gold: #d8a33d;
+  --green: #77b77a;
+  --red: #d66b55;
+  --in: #d7e7e0;
+  --out: #8fb8b6;
+  --cw: #577f86;
+  --cr: #314f62;
+  --rz: #7d6c9f;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 12% 8%, rgba(216, 163, 61, .11), transparent 28rem),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+    var(--paper);
+  background-size: auto, 44px 44px, auto;
+  font-family: Georgia, "Times New Roman", serif;
+}
+main { width: min(1220px, calc(100vw - 32px)); margin: 0 auto; padding: 34px 0 44px; }
+.mast { border-bottom: 1px solid var(--rule-strong); padding-bottom: 18px; display: flex; justify-content: space-between; gap: 20px; }
+h1 { margin: 0; font-size: clamp(38px, 7vw, 92px); line-height: .88; letter-spacing: -.05em; font-weight: 500; }
+.kicker, .label, th { color: var(--muted); font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; }
+.generated { text-align: right; align-self: end; max-width: 360px; }
+.stats { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
+.stat { padding: 18px 14px 16px; border-right: 1px solid var(--rule); min-width: 0; }
+.stat:last-child { border-right: 0; }
+.value { font: 29px/.95 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -.05em; white-space: nowrap; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 28px; margin-top: 30px; }
+.panel { border-top: 1px solid var(--rule-strong); padding-top: 14px; min-width: 0; }
+.panel h2 { margin: 0 0 14px; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+.chart { display: flex; align-items: flex-end; gap: 3px; height: 230px; padding: 10px 0 0; border-bottom: 1px solid var(--rule); }
+.day { flex: 1 1 3px; min-width: 3px; height: 100%; display: flex; flex-direction: column-reverse; justify-content: flex-start; opacity: .94; }
+.day:hover { outline: 1px solid var(--gold); outline-offset: 2px; opacity: 1; }
+.seg.in { background: var(--in); } .seg.out { background: var(--out); } .seg.cw { background: var(--cw); } .seg.cr { background: var(--cr); } .seg.rz { background: var(--rz); }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.swatch { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
+.costline { width: 100%; height: 74px; margin-top: 8px; overflow: visible; }
+.servicebar { display: flex; height: 32px; border: 1px solid var(--rule); margin-bottom: 12px; }
+.servicebit { min-width: 2px; }
+.service-list { display: grid; gap: 8px; }
+.service-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
+table { width: 100%; border-collapse: collapse; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+th, td { padding: 10px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { text-align: left; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.model-name { color: var(--ink); font-family: Georgia, "Times New Roman", serif; font-size: 15px; }
+.meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+.hosts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.host { border: 1px solid var(--rule); padding: 7px 9px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
+.host.updated .dot { color: var(--green); } .host.cached .dot { color: var(--gold); } .host.missing .dot { color: var(--red); }
+.note { color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 12px; }
+@media (max-width: 900px) { .mast, .grid { display: block; } .generated { text-align: left; margin-top: 14px; } .stats { grid-template-columns: repeat(2, 1fr); } .stat:nth-child(2n) { border-right: 0; } }
+</style>
+</head>
+<body>
+<main>
+  <header class="mast">
+    <div><div class="kicker">Personal instrument panel</div><h1>AI Usage<br>Ledger</h1></div>
+    <div class="generated"><div class="label">Generated</div><div id="generated"></div><p class="note">Accounts are merged by default. Cost is reported only when the source provides it.</p></div>
+  </header>
+  <section class="stats" id="stats" aria-label="Summary statistics"></section>
+  <section class="grid">
+    <div class="panel">
+      <h2>Daily Token Flow</h2>
+      <div id="chart" class="chart" aria-label="Daily token bars"></div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--in)"></i>input</span>
+        <span><i class="swatch" style="background:var(--out)"></i>output</span>
+        <span><i class="swatch" style="background:var(--cw)"></i>cache write</span>
+        <span><i class="swatch" style="background:var(--cr)"></i>cache read</span>
+        <span><i class="swatch" style="background:var(--rz)"></i>reasoning</span>
+      </div>
+      <svg id="costline" class="costline" viewBox="0 0 1000 74" preserveAspectRatio="none" aria-label="Daily cost line"></svg>
+    </div>
+    <aside class="panel">
+      <h2>Service Mix</h2>
+      <div id="servicebar" class="servicebar"></div>
+      <div id="services" class="service-list"></div>
+      <p class="note">The service field is inferred from provider/model names, so Grok used through pi is counted as Grok while retaining source=pi.</p>
+    </aside>
+  </section>
+  <section class="panel" style="margin-top:30px">
+    <h2>Top Models</h2>
+    <table>
+      <thead><tr><th>Model</th><th class="num">Days</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache</th><th class="num">Total</th><th class="num">Cost</th></tr></thead>
+      <tbody id="models"></tbody>
+    </table>
+  </section>
+  <section class="panel" style="margin-top:30px">
+    <h2>Host Cache Status</h2>
+    <div id="hosts" class="hosts"></div>
+  </section>
+</main>
+<script id="usage-data" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById('usage-data').textContent);
+const fields = ['input_tokens','output_tokens','cache_creation_tokens','cache_read_tokens','reasoning_tokens'];
+const segClass = ['in','out','cw','cr','rz'];
+function fmt(n) { n = Number(n || 0); if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return (n/1e3).toFixed(0)+'k'; return String(Math.round(n)); }
+function usd(n) { return '$' + Number(n || 0).toFixed(2); }
+function node(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; }
+function renderStats() {
+  document.getElementById('generated').textContent = D.generated_at || 'unknown';
+  const stats = [
+    ['total', fmt(D.summary.total_tokens)], ['input', fmt(D.summary.input_tokens)], ['output', fmt(D.summary.output_tokens)],
+    ['cache read', fmt(D.summary.cache_read_tokens)], ['cache write', fmt(D.summary.cache_creation_tokens)], ['cost', usd(D.summary.cost_usd)],
+    ['models', fmt(D.summary.active_models)], ['latest', D.summary.latest_date || 'n/a']
+  ];
+  const root = document.getElementById('stats');
+  stats.forEach(([label, value]) => { const box = node('div','stat'); box.append(node('div','label',label)); box.append(node('div','value',value)); root.append(box); });
+}
+function renderChart() {
+  const root = document.getElementById('chart');
+  const days = D.days || [];
+  const max = Math.max(1, ...days.map(d => Number(d.total_tokens || 0)));
+  days.forEach(d => {
+    const day = node('div','day');
+    day.title = `${d.date} · ${fmt(d.total_tokens)} tokens · ${usd(d.cost_usd)}`;
+    fields.forEach((f, idx) => { const seg = node('div', 'seg ' + segClass[idx]); const pct = Math.max(0, Number(d[f] || 0) / max * 100); seg.style.height = pct ? Math.max(.8, pct) + '%' : '0'; day.append(seg); });
+    root.append(day);
+  });
+}
+function renderCost() {
+  const svg = document.getElementById('costline');
+  const days = D.days || [];
+  const max = Math.max(0, ...days.map(d => Number(d.cost_usd || 0)));
+  if (!days.length || !max) { const t = document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('x','0'); t.setAttribute('y','38'); t.setAttribute('fill','#9d927f'); t.textContent = 'No reported cost data'; svg.append(t); return; }
+  const points = days.map((d, i) => { const x = days.length === 1 ? 0 : i * (1000 / (days.length - 1)); const y = 62 - (Number(d.cost_usd || 0) / max * 54); return `${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
+  const line = document.createElementNS('http://www.w3.org/2000/svg','polyline'); line.setAttribute('points', points); line.setAttribute('fill','none'); line.setAttribute('stroke','#d8a33d'); line.setAttribute('stroke-width','3'); line.setAttribute('vector-effect','non-scaling-stroke'); svg.append(line);
+  const t = document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('x','1000'); t.setAttribute('y','12'); t.setAttribute('text-anchor','end'); t.setAttribute('fill','#d8a33d'); t.textContent = 'max ' + usd(max); svg.append(t);
+}
+function renderServices() {
+  const palette = ['#d8a33d','#8fb8b6','#577f86','#7d6c9f','#d66b55','#77b77a','#ede4d1'];
+  const total = Math.max(1, D.services.reduce((sum, row) => sum + Number(row.total_tokens || 0), 0));
+  const bar = document.getElementById('servicebar');
+  const list = document.getElementById('services');
+  D.services.forEach((row, idx) => {
+    const color = palette[idx % palette.length];
+    const bit = node('div','servicebit'); bit.style.width = (Number(row.total_tokens || 0) / total * 100) + '%'; bit.style.background = color; bit.title = `${row.source}/${row.service} · ${fmt(row.total_tokens)}`; bar.append(bit);
+    const item = node('div','service-row'); const left = node('span','',`${row.source}/${row.service}`); left.style.color = color; item.append(left); item.append(node('span','',`${fmt(row.total_tokens)} · ${usd(row.cost_usd)}`)); list.append(item);
+  });
+}
+function renderModels() {
+  const body = document.getElementById('models');
+  D.models.forEach(row => {
+    const tr = document.createElement('tr');
+    const name = document.createElement('td');
+    name.title = `sources: ${(row.sources || []).join(', ')}; hosts: ${(row.hosts || []).join(', ')}; accounts: ${(row.accounts || []).join(', ')}`;
+    name.append(node('div','model-name',row.model || 'unknown'));
+    name.append(node('div','meta',`${row.service || 'unknown'} ${row.provider ? '· '+row.provider : ''} · ${(row.hosts || []).length || 'all'} hosts`));
+    tr.append(name);
+    [['days',fmt(row.days)],['input',fmt(row.input_tokens)],['output',fmt(row.output_tokens)],['cache',fmt(Number(row.cache_creation_tokens || 0)+Number(row.cache_read_tokens || 0))],['total',fmt(row.total_tokens)],['cost',usd(row.cost_usd)]].forEach(([, value]) => tr.append(node('td','num',value)));
+    body.append(tr);
+  });
+}
+function renderHosts() {
+  const root = document.getElementById('hosts');
+  (D.hosts || []).forEach(row => { const status = row.status || 'missing'; const item = node('div','host '+status); item.title = row.message || row.cache || ''; item.append(node('span','dot', status === 'updated' ? '● ' : status === 'cached' ? '◐ ' : '○ ')); item.append(document.createTextNode(`${row.host || 'host'} · ${status}`)); root.append(item); });
+}
+renderStats(); renderChart(); renderCost(); renderServices(); renderModels(); renderHosts();
+</script>
+</body>
+</html>
+"""
+
+
+def write_html(path: Path, combined: dict[str, Any], daily: list[dict[str, Any]]) -> None:
+    payload = dashboard_payload(combined, daily)
+    rendered = HTML_TEMPLATE.replace("__DATA__", json_for_script(payload))
+    rendered = rendered.replace("AI Usage Ledger", html_escape("AI Usage Ledger"), 1)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(rendered, encoding="utf-8")
+    tmp.replace(path)
+
+
 def build_combined(host_payloads: list[tuple[HostSpec, dict[str, Any], bool]], statuses: list[dict[str, Any]]) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     for spec, payload, cached in host_payloads:
@@ -894,7 +1242,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-csv", type=Path, default=Path(DEFAULT_CSV), help=f"Combined CSV output, default {DEFAULT_CSV}.")
     parser.add_argument("--daily-json", type=Path, default=Path(DEFAULT_DAILY_JSON), help=f"Daily aggregate JSON output, default {DEFAULT_DAILY_JSON}.")
     parser.add_argument("--daily-csv", type=Path, default=Path(DEFAULT_DAILY_CSV), help=f"Daily aggregate CSV output, default {DEFAULT_DAILY_CSV}.")
+    parser.add_argument("--html", type=Path, default=Path(DEFAULT_HTML), help=f"Static HTML dashboard output, default {DEFAULT_HTML}.")
     parser.add_argument("--no-daily", action="store_true", help="Skip daily aggregate outputs.")
+    parser.add_argument("--no-html", action="store_true", help="Skip static HTML dashboard output.")
     parser.add_argument("--daily-split-hosts", action="store_true", help="Keep hosts separate in daily aggregates instead of merging them.")
     parser.add_argument("--daily-split-accounts", action="store_true", help="Keep accounts separate in daily aggregates instead of merging them.")
     parser.add_argument("--ssh-timeout", type=int, default=8, help="SSH connect timeout in seconds.")
@@ -944,15 +1294,18 @@ def main() -> int:
         host_payloads.append((spec, payload, cached))
 
     combined = build_combined(host_payloads, statuses)
-    atomic_write_json(args.output_json, combined)
-    if not args.json_only:
-        write_csv(args.output_csv, combined["records"])
-    if not args.no_daily:
+    daily: list[dict[str, Any]] = []
+    if not args.no_daily or not args.no_html:
         daily = aggregate_daily(
             combined["records"],
             split_hosts=args.daily_split_hosts,
             split_accounts=args.daily_split_accounts,
         )
+
+    atomic_write_json(args.output_json, combined)
+    if not args.json_only:
+        write_csv(args.output_csv, combined["records"])
+    if not args.no_daily:
         atomic_write_json(
             args.daily_json,
             {
@@ -964,6 +1317,9 @@ def main() -> int:
         )
         if not args.json_only:
             write_daily_csv(args.daily_csv, daily)
+    if not args.no_html:
+        write_html(args.html, combined, daily)
+
     eprint(f"Wrote {args.output_json}")
     if not args.json_only:
         eprint(f"Wrote {args.output_csv}")
@@ -971,6 +1327,8 @@ def main() -> int:
         eprint(f"Wrote {args.daily_json}")
         if not args.json_only:
             eprint(f"Wrote {args.daily_csv}")
+    if not args.no_html:
+        eprint(f"Wrote {args.html}")
     return 0
 
 
