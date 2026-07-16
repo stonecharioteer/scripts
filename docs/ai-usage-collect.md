@@ -39,17 +39,22 @@ Default outputs:
 | `ai-usage-daily.json` | Daily per-model aggregates |
 | `ai-usage-daily.csv` | CSV version of daily aggregates |
 | `ai-usage.html` | Self-contained static dashboard refreshed on each run |
-| `ai-usage-infographic.png` | Shareable 1080x1350 (Instagram portrait) infographic — stat tiles, daily token flow, estimated cost, provider mix; no tables or host detail |
+| `ai-usage-infographic.png` | Shareable 1080x1350 (Instagram portrait) infographic — stat tiles, log-scale daily token flow with estimated-cost overlay, provider mix, and top models; no tables or host detail |
+
+All outputs cover the current calendar year by default (`--this-year`); pass `--no-this-year` for all-time. The per-host ledgers always keep full history regardless.
 | `.ai-usage-cache/<host>.json` | Append-only usage ledger for each host, stored next to the script by default |
 
 ## Examples
 
 ```bash
 # Collect this machine plus all hosts from ai-usage.hosts next to the script, when present
-./ai-usage-collect.py
+./ai-usage.sh
+
+# Include prior years in the outputs (default is the current year only)
+./ai-usage.sh --no-this-year
 
 # Collect this machine only
-./ai-usage-collect.py --inventory /dev/null
+./ai-usage.sh --inventory /dev/null
 
 # Collect local plus two SSH hosts
 ./ai-usage-collect.py --host eqr5 --host macbook=stone@macbook.local

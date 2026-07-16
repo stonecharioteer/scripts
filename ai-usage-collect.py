@@ -21,6 +21,7 @@ import csv
 import datetime as dt
 import html
 import json
+import math
 import os
 import platform
 import re
@@ -1543,6 +1544,12 @@ def provider_group(row: dict[str, Any]) -> str:
     return service or str(row.get("provider") or row.get("source") or "unknown")
 
 
+def short_model_name(model: Any) -> str:
+    name = clean_ccusage_model_name(str(model or "")).strip()
+    name = re.sub(r"-20\d{6}$", "", name)
+    return name or "unknown"
+
+
 # Ledger theme for the infographic. The five segment colors were validated for the
 # dark surface (OKLCH lightness band, chroma floor, CVD ΔE >= 12, contrast >= 3:1).
 INFOGRAPHIC_THEME = {
@@ -1587,6 +1594,7 @@ def write_infographic(path: Path, daily: list[dict[str, Any]], generated_at: str
     theme = INFOGRAPHIC_THEME
     days: dict[str, dict[str, float]] = {}
     providers: dict[str, dict[str, float]] = {}
+    models: dict[str, dict[str, float]] = {}
     token_fields = [key for key, _, _ in theme["segments"]]
     for row in daily:
         date = str(row.get("date") or "")
@@ -1599,6 +1607,9 @@ def write_infographic(path: Path, daily: list[dict[str, Any]], generated_at: str
         provider = providers.setdefault(provider_group(row), {"total_tokens": 0.0, "cost_usd": 0.0})
         provider["total_tokens"] += as_int(row.get("total_tokens"))
         provider["cost_usd"] += as_float(row.get("cost_usd"))
+        model = models.setdefault(short_model_name(row.get("model")), {"total_tokens": 0.0, "cost_usd": 0.0})
+        model["total_tokens"] += as_int(row.get("total_tokens"))
+        model["cost_usd"] += as_float(row.get("cost_usd"))
 
     if not days:
         eprint("Warning: no daily data; skipping infographic.")
@@ -1613,7 +1624,8 @@ def write_infographic(path: Path, daily: list[dict[str, Any]], generated_at: str
     peak_date = dates[day_values.index(peak)]
     cache = totals["cache_creation_tokens"] + totals["cache_read_tokens"]
     direct = totals["input_tokens"] + totals["output_tokens"]
-    ranked_providers = sorted(providers.items(), key=lambda item: (item[1]["cost_usd"], item[1]["total_tokens"]), reverse=True)[:8]
+    ranked_providers = sorted(providers.items(), key=lambda item: (item[1]["cost_usd"], item[1]["total_tokens"]), reverse=True)[:7]
+    ranked_models = sorted(models.items(), key=lambda item: (item[1]["cost_usd"], item[1]["total_tokens"]), reverse=True)[:7]
 
     with plt.rc_context(
         {
@@ -1630,10 +1642,10 @@ def write_infographic(path: Path, daily: list[dict[str, Any]], generated_at: str
         # 10 x 12.5 in at 108 dpi = 1080 x 1350 px: Instagram portrait (4:5), WhatsApp-friendly.
         fig = plt.figure(figsize=(10, 12.5), dpi=108)
         grid = fig.add_gridspec(
-            5, 1, height_ratios=[1.05, 0.62, 3.1, 1.5, 2.1], hspace=0.42, left=0.075, right=0.94, top=0.975, bottom=0.055
+            4, 2, height_ratios=[1.05, 0.62, 3.55, 2.15], hspace=0.46, wspace=0.34, left=0.075, right=0.94, top=0.975, bottom=0.055
         )
 
-        header = fig.add_subplot(grid[0])
+        header = fig.add_subplot(grid[0, :])
         header.axis("off")
         left, right = 0.075, 0.94
         fig.text(left, 0.962, "P E R S O N A L   I N S T R U M E N T   P A N E L", fontsize=8, color=theme["muted"], family=theme["mono"])
@@ -1642,7 +1654,7 @@ def write_infographic(path: Path, daily: list[dict[str, Any]], generated_at: str
         fig.text(right, 0.942, f"{dates[0]} to {dates[-1]} · {len(dates)} active days · all hosts merged", fontsize=8, color=theme["muted"], family=theme["mono"], ha="right")
         header.axhline(y=0.0, xmin=0, xmax=1, color=theme["rule_strong"], linewidth=1.2, clip_on=False)
 
-        tiles = fig.add_subplot(grid[1])
+        tiles = fig.add_subplot(grid[1, :])
         tiles.axis("off")
         stat_items = [
             ("EST. COST", fmt_usd(totals["cost_usd"])),
@@ -1660,64 +1672,92 @@ def write_infographic(path: Path, daily: list[dict[str, Any]], generated_at: str
             if index:
                 tiles.axvline(x=x - step * 0.09, ymin=0.05, ymax=0.95, color=theme["rule"], linewidth=1)
 
-        flow = fig.add_subplot(grid[2])
-        bottoms = [0.0] * len(dates)
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Patch
+
+        # Log-scale stacked bars, dashboard-style: the bar top reads the daily total
+        # on the log axis and segments split that height by their linear share.
+        flow = fig.add_subplot(grid[2, :])
+        flow.set_yscale("log")
+        positive_totals = [day["total_tokens"] for day in day_values if day["total_tokens"] > 0]
+        floor_decade = 10 ** math.floor(math.log10(min(positive_totals))) if positive_totals else 1
+        log_floor = math.log10(floor_decade)
         bar_width = max(0.8, (xs[-1] - xs[0]).days / max(1, len(dates)) * 0.85) if len(xs) > 1 else 0.8
+        segment_bounds: dict[str, tuple[list[float], list[float]]] = {key: ([], []) for key, _, _ in active_segments}
+        for day in day_values:
+            total = day["total_tokens"]
+            span = math.log10(total) - log_floor if total > floor_decade else 0.0
+            cumulative = 0.0
+            for key, _, _ in active_segments:
+                share = day[key] / total if total else 0.0
+                bottom = 10 ** (log_floor + span * cumulative)
+                cumulative = min(1.0, cumulative + share)
+                top = 10 ** (log_floor + span * cumulative)
+                segment_bounds[key][0].append(bottom)
+                segment_bounds[key][1].append(top)
         for key, label, color in active_segments:
-            values = [day[key] for day in day_values]
-            flow.bar(xs, values, bottom=bottoms, width=bar_width, color=color, label=label, linewidth=0)
-            bottoms = [base + value for base, value in zip(bottoms, values)]
-        flow.set_title("Daily Token Flow", loc="left", fontsize=16, color=theme["ink"], family=theme["serif"], pad=10)
-        flow.legend(loc="upper left", frameon=False, ncol=len(active_segments), fontsize=8, labelcolor=theme["muted"], handlelength=1, handleheight=1, prop={"family": theme["mono"], "size": 8})
+            bottoms, tops = segment_bounds[key]
+            heights = [top - bottom for top, bottom in zip(tops, bottoms)]
+            flow.bar(xs, heights, bottom=bottoms, width=bar_width, color=color, label=label, linewidth=0)
+        flow.set_ylim(floor_decade, max(positive_totals) * 1.25 if positive_totals else 10)
+        flow.set_title("Daily Token Flow & Estimated Cost (log scale)", loc="left", fontsize=16, color=theme["ink"], family=theme["serif"], pad=10)
         flow.grid(axis="y", color=theme["rule"], linewidth=0.7)
         flow.set_axisbelow(True)
         flow.yaxis.set_major_formatter(plt.FuncFormatter(lambda value, _pos: fmt_tokens(value)))
+        flow.yaxis.set_minor_formatter(plt.NullFormatter())
         flow.margins(x=0.01)
+        flow.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=8))
+        flow.xaxis.set_major_formatter(mdates.ConciseDateFormatter(flow.xaxis.get_major_locator()))
 
-        cost_ax = fig.add_subplot(grid[3], sharex=flow)
-        costs = [day["cost_usd"] for day in day_values]
-        cost_ax.plot(xs, costs, color=theme["gold"], linewidth=1.6)
-        cost_ax.fill_between(xs, costs, color=theme["gold"], alpha=0.14, linewidth=0)
-        cost_ax.set_title("Daily Estimated Cost (API-equivalent)", loc="left", fontsize=16, color=theme["ink"], family=theme["serif"], pad=10)
-        cost_ax.grid(axis="y", color=theme["rule"], linewidth=0.7)
-        cost_ax.set_axisbelow(True)
-        cost_ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda value, _pos: fmt_usd(value)))
-        cost_ax.margins(x=0.01)
-        cost_ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=8))
-        cost_ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(cost_ax.xaxis.get_major_locator()))
-        for axis in (flow, cost_ax):
-            for side in ("top", "right", "left"):
+        cost_overlay = flow.twinx()
+        cost_series = [day["cost_usd"] if day["cost_usd"] > 0 else float("nan") for day in day_values]
+        positive_costs = [value for value in cost_series if value == value]
+        if positive_costs:
+            cost_overlay.set_yscale("log")
+            cost_overlay.plot(xs, cost_series, color=theme["gold"], linewidth=1.6)
+            cost_overlay.set_ylim(10 ** math.floor(math.log10(min(positive_costs))), max(positive_costs) * 1.4)
+            cost_overlay.yaxis.set_major_formatter(plt.FuncFormatter(lambda value, _pos: fmt_usd(value)))
+            cost_overlay.yaxis.set_minor_formatter(plt.NullFormatter())
+        cost_overlay.tick_params(axis="y", colors=theme["gold"], labelsize=8)
+        handles = [Patch(facecolor=color, label=label) for _, label, color in active_segments]
+        handles.append(Line2D([], [], color=theme["gold"], linewidth=1.6, label="est. cost"))
+        flow.legend(handles=handles, loc="upper left", frameon=False, ncol=len(handles), labelcolor=theme["muted"], handlelength=1, handleheight=1, prop={"family": theme["mono"], "size": 8})
+        for axis in (flow, cost_overlay):
+            for side in ("top", "left", "right"):
                 axis.spines[side].set_visible(False)
+            axis.spines["bottom"].set_color(theme["rule"])
             for tick in (*axis.get_xticklabels(), *axis.get_yticklabels()):
                 tick.set_fontfamily(theme["mono"])
                 tick.set_fontsize(8)
-        plt.setp(flow.get_xticklabels(), visible=False)
 
-        mix = fig.add_subplot(grid[4])
-        names = [name for name, _ in ranked_providers][::-1]
-        mix_costs = [values["cost_usd"] for _, values in ranked_providers][::-1]
-        mix_tokens = [values["total_tokens"] for _, values in ranked_providers][::-1]
-        mix.barh(names, mix_costs, color=theme["gold"], height=0.62, linewidth=0)
-        mix.set_title("Provider Mix by Estimated Cost", loc="left", fontsize=16, color=theme["ink"], family=theme["serif"], pad=10)
-        top_cost = max(mix_costs) if mix_costs else 1
-        for index, (cost_value, token_value) in enumerate(zip(mix_costs, mix_tokens)):
-            mix.text(cost_value + top_cost * 0.015, index, f"{fmt_usd(cost_value)} · {fmt_tokens(token_value)} tokens", va="center", fontsize=8.5, color=theme["ink"], family=theme["mono"])
-        mix.set_xlim(0, top_cost * 1.28)
-        mix.xaxis.set_visible(False)
-        for side in ("top", "right", "bottom"):
-            mix.spines[side].set_visible(False)
-        mix.spines["left"].set_color(theme["rule_strong"])
-        mix.tick_params(axis="y", length=0)
-        for tick in mix.get_yticklabels():
-            tick.set_fontfamily(theme["mono"])
-            tick.set_fontsize(9)
-            tick.set_color(theme["ink"])
+        def ranked_barh(axis: Any, ranked: list[tuple[str, dict[str, float]]], title: str) -> None:
+            names = [name for name, _ in ranked][::-1]
+            bar_costs = [values["cost_usd"] for _, values in ranked][::-1]
+            bar_tokens = [values["total_tokens"] for _, values in ranked][::-1]
+            axis.barh(names, bar_costs, color=theme["gold"], height=0.62, linewidth=0)
+            axis.set_title(title, loc="left", fontsize=15, color=theme["ink"], family=theme["serif"], pad=10)
+            top_cost = max(bar_costs) if bar_costs else 1
+            for index, (cost_value, token_value) in enumerate(zip(bar_costs, bar_tokens)):
+                axis.text(cost_value + top_cost * 0.02, index, f"{fmt_usd(cost_value)} · {fmt_tokens(token_value)}", va="center", fontsize=7.5, color=theme["ink"], family=theme["mono"])
+            axis.set_xlim(0, top_cost * 1.42)
+            axis.xaxis.set_visible(False)
+            for side in ("top", "right", "bottom"):
+                axis.spines[side].set_visible(False)
+            axis.spines["left"].set_color(theme["rule_strong"])
+            axis.tick_params(axis="y", length=0)
+            for tick in axis.get_yticklabels():
+                tick.set_fontfamily(theme["mono"])
+                tick.set_fontsize(8.5)
+                tick.set_color(theme["ink"])
+
+        ranked_barh(fig.add_subplot(grid[3, 0]), ranked_providers, "Provider Mix by Est. Cost")
+        ranked_barh(fig.add_subplot(grid[3, 1]), ranked_models, "Top Models by Est. Cost")
 
         avg = totals["total_tokens"] / max(1, len(dates))
         output_share = totals["output_tokens"] / totals["total_tokens"] * 100 if totals["total_tokens"] else 0
         cache_mult = cache / direct if direct else 0
         fig.text(0.075, 0.022, f"Tokenmaxxing at {fmt_tokens(avg)} tokens/day · cache multiplier {cache_mult:.1f}x · output share {output_share:.1f}% · peak {peak_date} ({fmt_tokens(peak['total_tokens'])})", fontsize=9, color=theme["gold"], family=theme["mono"])
-        fig.text(0.075, 0.007, "Cost is an API-equivalent estimate from ccusage pricing, not billed spend · generated by ai-usage-collect.py", fontsize=7.5, color=theme["muted"], family=theme["mono"])
+        fig.text(0.075, 0.007, "github.com/stonecharioteer/scripts", fontsize=7.5, color=theme["muted"], family=theme["mono"])
 
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, facecolor=theme["paper"])
@@ -1759,6 +1799,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--daily-csv", type=Path, default=Path(DEFAULT_DAILY_CSV), help=f"Daily aggregate CSV output, default {DEFAULT_DAILY_CSV}.")
     parser.add_argument("--html", type=Path, default=Path(DEFAULT_HTML), help=f"Static HTML dashboard output, default {DEFAULT_HTML}.")
     parser.add_argument("--infographic", type=Path, default=Path(DEFAULT_INFOGRAPHIC), help=f"Shareable PNG infographic output, default {DEFAULT_INFOGRAPHIC}. Requires matplotlib (run via uv).")
+    parser.add_argument(
+        "--this-year",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Limit all outputs to the current calendar year (default). Per-host ledgers always keep full history; use --no-this-year for all-time outputs.",
+    )
     parser.add_argument("--no-daily", action="store_true", help="Skip daily aggregate outputs.")
     parser.add_argument("--no-html", action="store_true", help="Skip static HTML dashboard output.")
     parser.add_argument("--no-infographic", action="store_true", help="Skip the PNG infographic output.")
@@ -1877,6 +1923,11 @@ def main() -> int:
         host_payloads.append((spec, payload, cached))
 
     combined = build_combined(host_payloads, statuses)
+    if args.this_year:
+        year_prefix = dt.date.today().strftime("%Y-")
+        combined["records"] = [r for r in combined["records"] if str(r.get("date") or "").startswith(year_prefix)]
+        combined["summary"] = summarize_records(combined["records"])
+        eprint(f"Filtered outputs to {year_prefix}01-01 onward ({len(combined['records'])} records); ledgers keep full history.")
     daily: list[dict[str, Any]] = []
     if not args.no_daily or not args.no_html:
         daily = aggregate_daily(
