@@ -1,6 +1,14 @@
 # ai-usage-collect.py
 
-Collect AI coding-agent usage from local and SSH-reachable machines into JSON, CSV, and a static HTML dashboard.
+Collect AI coding-agent usage from local and SSH-reachable machines into JSON, CSV, a static HTML dashboard, and a shareable PNG infographic.
+
+Run it through the wrapper so uv resolves matplotlib for the infographic:
+
+```bash
+./ai-usage.sh            # equivalent to: uv run --script ai-usage-collect.py
+```
+
+The Python script's shebang is `#!/usr/bin/env -S uv run --script`, so `./ai-usage-collect.py` also works directly. Plain `python3 ai-usage-collect.py` works too but skips the infographic (matplotlib is imported lazily and remote hosts always run plain python3 over SSH).
 
 ## Why
 
@@ -31,6 +39,7 @@ Default outputs:
 | `ai-usage-daily.json` | Daily per-model aggregates |
 | `ai-usage-daily.csv` | CSV version of daily aggregates |
 | `ai-usage.html` | Self-contained static dashboard refreshed on each run |
+| `ai-usage-infographic.png` | Shareable 1080x1350 (Instagram portrait) infographic — stat tiles, daily token flow, estimated cost, provider mix; no tables or host detail |
 | `.ai-usage-cache/<host>.json` | Append-only usage ledger for each host, stored next to the script by default |
 
 ## Examples
@@ -104,6 +113,12 @@ The dashboard is a single self-contained file: CSS, aggregate data, and a pinned
 - host ledger status, including cached/offline hosts with their last-collected date
 
 The HTML embeds only aggregate dashboard data, not raw prompts, responses, tool calls, or per-session records.
+
+### Sharing
+
+The headline stats and the model table are prerendered into the HTML itself, so viewers that block JavaScript (mail attachment previews, Drive/WhatsApp in-app viewers) still show real numbers with a `<noscript>` note instead of a blank page; a normal browser upgrades to the full interactive version.
+
+For a picture instead of a page, share `ai-usage-infographic.png` — a dark-themed 4:5 summary rendered with matplotlib in the same ledger style (validated colorblind-safe palette, serif/mono typography, no default matplotlib colors or fonts). Skip it with `--no-infographic` or point it elsewhere with `--infographic PATH`.
 
 ## Sources
 

@@ -14,7 +14,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[audible-download.sh](docs/audible-download.md)** - Bulk download audiobooks from Audible with filtering options
 
 ### Development Tools
-- **[ai-usage-collect.py](docs/ai-usage-collect.md)** - Collect ccusage-backed AI coding stats from local/SSH hosts in parallel into append-only per-host ledgers, JSON/CSV, and an offline-capable responsive dashboard with host/date filters, sortable model table, heatmaps, and tokenmaxxing metrics
+- **[ai-usage-collect.py](docs/ai-usage-collect.md)** - Collect ccusage-backed AI coding stats from local/SSH hosts in parallel into append-only per-host ledgers, JSON/CSV, an offline-capable responsive dashboard, and a shareable PNG infographic; run via `ai-usage.sh` so uv resolves matplotlib
 - **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, check runner/machine info, reviews, and bot activity (CodeRabbit, etc.)
 - **[env-diff.sh](docs/env-diff.md)** - Compare `.env` files in a gum table while redacting token-like values
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
@@ -48,9 +48,9 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ./check-pr.sh --concise  # Show only summary and items needing attention
 ./check-pr.sh /path/to/repo  # Check a PR from another repository directory
 
-# Collect AI coding-agent usage into raw/daily JSON/CSV stats and ai-usage.html
-./ai-usage-collect.py
-./ai-usage-collect.py --host eqr5 --host macbook=stone@macbook.local
+# Collect AI coding-agent usage into JSON/CSV stats, ai-usage.html, and a shareable infographic
+./ai-usage.sh
+./ai-usage.sh --host eqr5 --host macbook=stone@macbook.local
 
 # Diff env files without printing token-like values
 ./env-diff.sh .env .env.example
@@ -82,7 +82,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | audiobook-pipeline | `uvx`, `audible-cli`, `ffmpeg`, `gum` |
 | audiobook-split | `ffmpeg`, `gum` |
 | audible-download | `uvx`, `audible-cli`, `gum` |
-| ai-usage-collect | `python3`, `ssh` for remote hosts, `ccusage`/`npx` for unified usage and cost data |
+| ai-usage-collect | `uv` (matplotlib for the infographic), `ssh` for remote hosts, `ccusage`/`npx` for unified usage and cost data |
 | check-pr | `uv`, `gh`, `git` |
 | env-diff | `gum`, `awk`, `sort` |
 | gi-select | `gum`, gitignore repository |

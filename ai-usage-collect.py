@@ -1,8 +1,16 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["matplotlib"]
+# ///
 """Collect local and remote AI coding-agent usage into JSON and CSV.
 
 The collector intentionally records usage metadata only. It does not copy prompts,
 responses, tool arguments, auth files, or raw transcripts into the output.
+
+Run via uv (resolves matplotlib for the infographic) or plain python3 (everything
+except the infographic works; matplotlib is imported lazily). Remote hosts always
+receive the script over SSH and run it with plain python3.
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ DEFAULT_CSV = "ai-usage.csv"
 DEFAULT_DAILY_JSON = "ai-usage-daily.json"
 DEFAULT_DAILY_CSV = "ai-usage-daily.csv"
 DEFAULT_HTML = "ai-usage.html"
+DEFAULT_INFOGRAPHIC = "ai-usage-infographic.png"
 DEFAULT_CCUSAGE_PACKAGE = "ccusage@latest"
 D3_VERSION = "7.9.0"
 D3_URL = f"https://cdn.jsdelivr.net/npm/d3@{D3_VERSION}/dist/d3.min.js"
@@ -710,6 +719,84 @@ def html_escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
 
+def fmt_tokens(value: Any) -> str:
+    number = as_float(value)
+    if number >= 1e9:
+        return f"{number / 1e9:.1f}B"
+    if number >= 1e6:
+        return f"{number / 1e6:.1f}M"
+    if number >= 1e3:
+        return f"{number / 1e3:.0f}k"
+    return str(int(round(number)))
+
+
+def fmt_usd(value: Any) -> str:
+    number = as_float(value)
+    if number >= 1000:
+        return f"${number:,.0f}"
+    return f"${number:.2f}"
+
+
+def static_dashboard_html(rows: list[dict[str, Any]]) -> tuple[str, str]:
+    """Prerender the stat tiles and model table so the page shows data even where
+    JavaScript is blocked (mail/chat/drive previews). JS re-renders on load."""
+    totals = {key: 0 for key in ("input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens")}
+    cost = 0.0
+    latest = ""
+    models: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        for key in totals:
+            totals[key] += as_int(row.get(key))
+        cost += as_float(row.get("cost_usd"))
+        latest = max(latest, str(row.get("date") or ""))
+        model_key = (str(row.get("service") or ""), str(row.get("provider") or ""), str(row.get("model") or ""))
+        bucket = models.setdefault(
+            model_key,
+            {"model": model_key[2], "service": model_key[0], "days": set(), "sources": set(),
+             "input_tokens": 0, "output_tokens": 0, "cache_tokens": 0, "total_tokens": 0, "cost_usd": 0.0},
+        )
+        for key in ("input_tokens", "output_tokens", "total_tokens"):
+            bucket[key] += as_int(row.get(key))
+        bucket["cache_tokens"] += as_int(row.get("cache_creation_tokens")) + as_int(row.get("cache_read_tokens"))
+        bucket["cost_usd"] += as_float(row.get("cost_usd"))
+        if row.get("date"):
+            bucket["days"].add(str(row.get("date")))
+        if row.get("source"):
+            bucket["sources"].add(str(row.get("source")))
+
+    stats = [
+        ("est. cost", fmt_usd(cost)),
+        ("output", fmt_tokens(totals["output_tokens"])),
+        ("input", fmt_tokens(totals["input_tokens"])),
+        ("cache read", fmt_tokens(totals["cache_read_tokens"])),
+        ("cache write", fmt_tokens(totals["cache_creation_tokens"])),
+        ("total", fmt_tokens(totals["total_tokens"])),
+        ("models", str(len(models))),
+        ("latest", latest or "n/a"),
+    ]
+    stats_html = "".join(
+        f'<div class="stat"><div class="label">{html_escape(label)}</div><div class="value">{html_escape(value)}</div></div>'
+        for label, value in stats
+    )
+
+    ranked = sorted(models.values(), key=lambda item: (item["cost_usd"], item["total_tokens"]), reverse=True)
+    model_rows = []
+    for bucket in ranked:
+        meta = " · ".join(part for part in (bucket["service"], "via " + ", ".join(sorted(bucket["sources"])) if bucket["sources"] else "") if part)
+        model_rows.append(
+            "<tr><td>"
+            f'<div class="model-name">{html_escape(bucket["model"] or "unknown")}</div>'
+            f'<div class="meta">{html_escape(meta)}</div></td>'
+            f'<td class="num">{len(bucket["days"])}</td>'
+            f'<td class="num">{fmt_tokens(bucket["input_tokens"])}</td>'
+            f'<td class="num">{fmt_tokens(bucket["output_tokens"])}</td>'
+            f'<td class="num">{fmt_tokens(bucket["cache_tokens"])}</td>'
+            f'<td class="num">{fmt_tokens(bucket["total_tokens"])}</td>'
+            f'<td class="num">{fmt_usd(bucket["cost_usd"])}</td></tr>'
+        )
+    return stats_html, "".join(model_rows)
+
+
 def dashboard_payload(combined: dict[str, Any], daily: list[dict[str, Any]]) -> dict[str, Any]:
     # The dashboard recomputes every aggregate client-side from `rows` (the date
     # range and host filters need that anyway), so only rows and host statuses
@@ -882,9 +969,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 <main>
   <header class="mast">
     <div><div class="kicker">Personal instrument panel</div><h1>AI Usage<br>Ledger</h1></div>
-    <div class="generated"><div class="label">Generated</div><div id="generated"></div><p class="note">Accounts are merged by default. Cost is an API-equivalent estimate from ccusage pricing, not billed spend.</p></div>
+    <div class="generated"><div class="label">Generated</div><div id="generated">__GENERATED_AT__</div><p class="note">Accounts are merged by default. Cost is an API-equivalent estimate from ccusage pricing, not billed spend.</p></div>
   </header>
-  <section class="stats" id="stats" aria-label="Summary statistics"></section>
+  <section class="stats" id="stats" aria-label="Summary statistics">__STATIC_STATS__</section>
+  <noscript><div class="coverage visible">This viewer has JavaScript disabled, so the charts and filters are unavailable — the numbers above and the model table below are all-time totals. Download the file and open it in a browser for the interactive version.</div></noscript>
   <div id="coverage" class="coverage" role="alert"></div>
   <section class="rangebar" aria-label="Filters">
     <div class="filter-group" aria-label="Date range presets">
@@ -966,7 +1054,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
           <th class="num sortable" data-key="total_tokens">Total</th>
           <th class="num sortable desc" data-key="cost_usd">Est. Cost</th>
         </tr></thead>
-        <tbody id="models"></tbody>
+        <tbody id="models">__STATIC_MODELS__</tbody>
       </table>
     </div>
   </section>
@@ -1436,12 +1524,205 @@ def d3_script_tag(cache_dir: Path) -> str:
 def write_html(path: Path, combined: dict[str, Any], daily: list[dict[str, Any]], cache_dir: Path) -> None:
     dashboard_daily = aggregate_daily(combined["records"], split_hosts=True, split_accounts=False)
     payload = dashboard_payload(combined, dashboard_daily or daily)
+    static_stats, static_models = static_dashboard_html(payload["rows"])
     rendered = HTML_TEMPLATE.replace("__DATA__", json_for_script(payload))
     rendered = rendered.replace("__D3_SCRIPT__", d3_script_tag(cache_dir))
+    rendered = rendered.replace("__GENERATED_AT__", html_escape(payload.get("generated_at") or ""))
+    rendered = rendered.replace("__STATIC_STATS__", static_stats)
+    rendered = rendered.replace("__STATIC_MODELS__", static_models)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(rendered, encoding="utf-8")
     tmp.replace(path)
+
+
+def provider_group(row: dict[str, Any]) -> str:
+    service = str(row.get("service") or "")
+    if service == "codex":
+        return "openai"
+    return service or str(row.get("provider") or row.get("source") or "unknown")
+
+
+# Ledger theme for the infographic. The five segment colors were validated for the
+# dark surface (OKLCH lightness band, chroma floor, CVD ΔE >= 12, contrast >= 3:1).
+INFOGRAPHIC_THEME = {
+    "paper": "#15130f",
+    "ink": "#ede4d1",
+    "muted": "#9d927f",
+    "rule": "#343025",
+    "rule_strong": "#5a4d35",
+    "gold": "#d8a33d",
+    "serif": ["Georgia", "Times New Roman", "DejaVu Serif", "serif"],
+    "mono": ["Menlo", "Consolas", "DejaVu Sans Mono", "monospace"],
+    "segments": [
+        ("input_tokens", "input", "#5aa860"),
+        ("output_tokens", "output", "#2ba3b5"),
+        ("cache_creation_tokens", "cache write", "#4b83d1"),
+        ("cache_read_tokens", "cache read", "#c563a9"),
+        ("reasoning_tokens", "reasoning", "#d0705b"),
+    ],
+}
+
+
+def write_infographic(path: Path, daily: list[dict[str, Any]], generated_at: str) -> bool:
+    """Render a shareable PNG summary: stat tiles, daily token flow, estimated cost,
+    and provider mix. No tables or host detail — this is the version to share."""
+    try:
+        import logging
+
+        import matplotlib
+
+        matplotlib.use("Agg")
+        # Font fallback is expected (Menlo on macOS, DejaVu elsewhere); don't warn per glyph.
+        logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
+    except ImportError:
+        eprint(
+            "Warning: matplotlib unavailable; skipping infographic. "
+            "Run via 'uv run --script ai-usage-collect.py' to include it."
+        )
+        return False
+
+    theme = INFOGRAPHIC_THEME
+    days: dict[str, dict[str, float]] = {}
+    providers: dict[str, dict[str, float]] = {}
+    token_fields = [key for key, _, _ in theme["segments"]]
+    for row in daily:
+        date = str(row.get("date") or "")
+        if not date:
+            continue
+        day = days.setdefault(date, {key: 0.0 for key in (*token_fields, "total_tokens", "cost_usd")})
+        for key in (*token_fields, "total_tokens"):
+            day[key] += as_int(row.get(key))
+        day["cost_usd"] += as_float(row.get("cost_usd"))
+        provider = providers.setdefault(provider_group(row), {"total_tokens": 0.0, "cost_usd": 0.0})
+        provider["total_tokens"] += as_int(row.get("total_tokens"))
+        provider["cost_usd"] += as_float(row.get("cost_usd"))
+
+    if not days:
+        eprint("Warning: no daily data; skipping infographic.")
+        return False
+
+    dates = sorted(days)
+    day_values = [days[date] for date in dates]
+    xs = [dt.datetime.strptime(date, "%Y-%m-%d") for date in dates]
+    totals = {key: sum(day[key] for day in day_values) for key in (*token_fields, "total_tokens", "cost_usd")}
+    active_segments = [(key, label, color) for key, label, color in theme["segments"] if totals[key] > 0]
+    peak = max(day_values, key=lambda day: day["total_tokens"])
+    peak_date = dates[day_values.index(peak)]
+    cache = totals["cache_creation_tokens"] + totals["cache_read_tokens"]
+    direct = totals["input_tokens"] + totals["output_tokens"]
+    ranked_providers = sorted(providers.items(), key=lambda item: (item[1]["cost_usd"], item[1]["total_tokens"]), reverse=True)[:8]
+
+    with plt.rc_context(
+        {
+            "figure.facecolor": theme["paper"],
+            "axes.facecolor": theme["paper"],
+            "font.family": theme["serif"],
+            "text.color": theme["ink"],
+            "axes.edgecolor": theme["rule"],
+            "xtick.color": theme["muted"],
+            "ytick.color": theme["muted"],
+            "svg.fonttype": "none",
+        }
+    ):
+        # 10 x 12.5 in at 108 dpi = 1080 x 1350 px: Instagram portrait (4:5), WhatsApp-friendly.
+        fig = plt.figure(figsize=(10, 12.5), dpi=108)
+        grid = fig.add_gridspec(
+            5, 1, height_ratios=[1.05, 0.62, 3.1, 1.5, 2.1], hspace=0.42, left=0.075, right=0.94, top=0.975, bottom=0.055
+        )
+
+        header = fig.add_subplot(grid[0])
+        header.axis("off")
+        left, right = 0.075, 0.94
+        fig.text(left, 0.962, "P E R S O N A L   I N S T R U M E N T   P A N E L", fontsize=8, color=theme["muted"], family=theme["mono"])
+        fig.text(left, 0.912, "AI Usage Ledger", fontsize=38, color=theme["ink"], family=theme["serif"], va="baseline")
+        fig.text(right, 0.958, f"generated {generated_at}", fontsize=8, color=theme["muted"], family=theme["mono"], ha="right")
+        fig.text(right, 0.942, f"{dates[0]} to {dates[-1]} · {len(dates)} active days · all hosts merged", fontsize=8, color=theme["muted"], family=theme["mono"], ha="right")
+        header.axhline(y=0.0, xmin=0, xmax=1, color=theme["rule_strong"], linewidth=1.2, clip_on=False)
+
+        tiles = fig.add_subplot(grid[1])
+        tiles.axis("off")
+        stat_items = [
+            ("EST. COST", fmt_usd(totals["cost_usd"])),
+            ("OUTPUT", fmt_tokens(totals["output_tokens"])),
+            ("INPUT", fmt_tokens(totals["input_tokens"])),
+            ("CACHE READ", fmt_tokens(totals["cache_read_tokens"])),
+            ("CACHE WRITE", fmt_tokens(totals["cache_creation_tokens"])),
+            ("TOTAL", fmt_tokens(totals["total_tokens"])),
+        ]
+        step = 1.0 / len(stat_items)
+        for index, (label, value) in enumerate(stat_items):
+            x = index * step
+            tiles.text(x, 0.78, label, fontsize=8, color=theme["muted"], family=theme["mono"])
+            tiles.text(x, 0.16, value, fontsize=19, color=theme["ink"], family=theme["mono"])
+            if index:
+                tiles.axvline(x=x - step * 0.09, ymin=0.05, ymax=0.95, color=theme["rule"], linewidth=1)
+
+        flow = fig.add_subplot(grid[2])
+        bottoms = [0.0] * len(dates)
+        bar_width = max(0.8, (xs[-1] - xs[0]).days / max(1, len(dates)) * 0.85) if len(xs) > 1 else 0.8
+        for key, label, color in active_segments:
+            values = [day[key] for day in day_values]
+            flow.bar(xs, values, bottom=bottoms, width=bar_width, color=color, label=label, linewidth=0)
+            bottoms = [base + value for base, value in zip(bottoms, values)]
+        flow.set_title("Daily Token Flow", loc="left", fontsize=16, color=theme["ink"], family=theme["serif"], pad=10)
+        flow.legend(loc="upper left", frameon=False, ncol=len(active_segments), fontsize=8, labelcolor=theme["muted"], handlelength=1, handleheight=1, prop={"family": theme["mono"], "size": 8})
+        flow.grid(axis="y", color=theme["rule"], linewidth=0.7)
+        flow.set_axisbelow(True)
+        flow.yaxis.set_major_formatter(plt.FuncFormatter(lambda value, _pos: fmt_tokens(value)))
+        flow.margins(x=0.01)
+
+        cost_ax = fig.add_subplot(grid[3], sharex=flow)
+        costs = [day["cost_usd"] for day in day_values]
+        cost_ax.plot(xs, costs, color=theme["gold"], linewidth=1.6)
+        cost_ax.fill_between(xs, costs, color=theme["gold"], alpha=0.14, linewidth=0)
+        cost_ax.set_title("Daily Estimated Cost (API-equivalent)", loc="left", fontsize=16, color=theme["ink"], family=theme["serif"], pad=10)
+        cost_ax.grid(axis="y", color=theme["rule"], linewidth=0.7)
+        cost_ax.set_axisbelow(True)
+        cost_ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda value, _pos: fmt_usd(value)))
+        cost_ax.margins(x=0.01)
+        cost_ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=8))
+        cost_ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(cost_ax.xaxis.get_major_locator()))
+        for axis in (flow, cost_ax):
+            for side in ("top", "right", "left"):
+                axis.spines[side].set_visible(False)
+            for tick in (*axis.get_xticklabels(), *axis.get_yticklabels()):
+                tick.set_fontfamily(theme["mono"])
+                tick.set_fontsize(8)
+        plt.setp(flow.get_xticklabels(), visible=False)
+
+        mix = fig.add_subplot(grid[4])
+        names = [name for name, _ in ranked_providers][::-1]
+        mix_costs = [values["cost_usd"] for _, values in ranked_providers][::-1]
+        mix_tokens = [values["total_tokens"] for _, values in ranked_providers][::-1]
+        mix.barh(names, mix_costs, color=theme["gold"], height=0.62, linewidth=0)
+        mix.set_title("Provider Mix by Estimated Cost", loc="left", fontsize=16, color=theme["ink"], family=theme["serif"], pad=10)
+        top_cost = max(mix_costs) if mix_costs else 1
+        for index, (cost_value, token_value) in enumerate(zip(mix_costs, mix_tokens)):
+            mix.text(cost_value + top_cost * 0.015, index, f"{fmt_usd(cost_value)} · {fmt_tokens(token_value)} tokens", va="center", fontsize=8.5, color=theme["ink"], family=theme["mono"])
+        mix.set_xlim(0, top_cost * 1.28)
+        mix.xaxis.set_visible(False)
+        for side in ("top", "right", "bottom"):
+            mix.spines[side].set_visible(False)
+        mix.spines["left"].set_color(theme["rule_strong"])
+        mix.tick_params(axis="y", length=0)
+        for tick in mix.get_yticklabels():
+            tick.set_fontfamily(theme["mono"])
+            tick.set_fontsize(9)
+            tick.set_color(theme["ink"])
+
+        avg = totals["total_tokens"] / max(1, len(dates))
+        output_share = totals["output_tokens"] / totals["total_tokens"] * 100 if totals["total_tokens"] else 0
+        cache_mult = cache / direct if direct else 0
+        fig.text(0.075, 0.022, f"Tokenmaxxing at {fmt_tokens(avg)} tokens/day · cache multiplier {cache_mult:.1f}x · output share {output_share:.1f}% · peak {peak_date} ({fmt_tokens(peak['total_tokens'])})", fontsize=9, color=theme["gold"], family=theme["mono"])
+        fig.text(0.075, 0.007, "Cost is an API-equivalent estimate from ccusage pricing, not billed spend · generated by ai-usage-collect.py", fontsize=7.5, color=theme["muted"], family=theme["mono"])
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, facecolor=theme["paper"])
+        plt.close(fig)
+    return True
 
 
 def build_combined(host_payloads: list[tuple[HostSpec, dict[str, Any], bool]], statuses: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1477,8 +1758,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--daily-json", type=Path, default=Path(DEFAULT_DAILY_JSON), help=f"Daily aggregate JSON output, default {DEFAULT_DAILY_JSON}.")
     parser.add_argument("--daily-csv", type=Path, default=Path(DEFAULT_DAILY_CSV), help=f"Daily aggregate CSV output, default {DEFAULT_DAILY_CSV}.")
     parser.add_argument("--html", type=Path, default=Path(DEFAULT_HTML), help=f"Static HTML dashboard output, default {DEFAULT_HTML}.")
+    parser.add_argument("--infographic", type=Path, default=Path(DEFAULT_INFOGRAPHIC), help=f"Shareable PNG infographic output, default {DEFAULT_INFOGRAPHIC}. Requires matplotlib (run via uv).")
     parser.add_argument("--no-daily", action="store_true", help="Skip daily aggregate outputs.")
     parser.add_argument("--no-html", action="store_true", help="Skip static HTML dashboard output.")
+    parser.add_argument("--no-infographic", action="store_true", help="Skip the PNG infographic output.")
     parser.add_argument("--daily-split-hosts", action="store_true", help="Keep hosts separate in daily aggregates instead of merging them.")
     parser.add_argument("--daily-split-accounts", action="store_true", help="Keep accounts separate in daily aggregates instead of merging them.")
     parser.add_argument("--ssh-timeout", type=int, default=8, help="SSH connect timeout in seconds.")
@@ -1619,6 +1902,9 @@ def main() -> int:
             write_daily_csv(args.daily_csv, daily)
     if not args.no_html:
         write_html(args.html, combined, daily, cache_dir)
+    infographic_written = False
+    if not args.no_infographic:
+        infographic_written = write_infographic(args.infographic, aggregate_daily(combined["records"]), combined["generated_at"])
 
     eprint(f"Wrote {args.output_json}")
     if not args.json_only:
@@ -1629,6 +1915,8 @@ def main() -> int:
             eprint(f"Wrote {args.daily_csv}")
     if not args.no_html:
         eprint(f"Wrote {args.html}")
+    if infographic_written:
+        eprint(f"Wrote {args.infographic}")
     return 0
 
 
