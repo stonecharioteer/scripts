@@ -839,12 +839,16 @@ h1 { margin: 0; font-size: clamp(38px, 7vw, 92px); line-height: .88; letter-spac
 .chart-head h2 { margin: 0; }
 .scale-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; letter-spacing: .12em; }
 .scale-control select { color: var(--ink); background: var(--paper); border: 1px solid var(--rule); padding: 6px 8px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.chart-body { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: start; }
+.chart-body { display: grid; grid-template-columns: 58px minmax(0, 1fr) 58px; gap: 10px; align-items: start; }
 .chart-stack { min-width: 0; }
 .y-axis { position: relative; height: 230px; border-bottom: 1px solid transparent; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .y-tick { position: absolute; right: 0; transform: translateY(50%); white-space: nowrap; }
+.cost-y-axis .y-tick { left: 0; right: auto; color: var(--gold); }
 .chart { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 230px; padding: 10px 0 0; border-bottom: 1px solid var(--rule); }
 .gridline { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(237,228,209,.08); z-index: 0; }
+.cost-overlay { position: absolute; inset: 10px 0 0 0; width: 100%; height: calc(100% - 10px); z-index: 3; pointer-events: none; overflow: visible; }
+.cost-overlay path { fill: none; stroke: var(--gold); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.cost-overlay circle { fill: var(--paper); stroke: var(--gold); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .day { position: relative; z-index: 1; flex: 1 1 3px; min-width: 3px; height: 100%; display: flex; flex-direction: column-reverse; justify-content: flex-start; opacity: .94; }
 .day:hover { outline: 1px solid var(--gold); outline-offset: 2px; opacity: 1; }
 .seg.in { background: var(--in); } .seg.out { background: var(--out); } .seg.cw { background: var(--cw); } .seg.cr { background: var(--cr); } .seg.rz { background: var(--rz); }
@@ -854,7 +858,7 @@ h1 { margin: 0; font-size: clamp(38px, 7vw, 92px); line-height: .88; letter-spac
 .axis-tick:last-child { transform: translateX(-100%); }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
-.costline { display: block; width: 100%; height: 74px; margin-top: 10px; overflow: hidden; }
+.swatch.line { height: 2px; width: 18px; vertical-align: 3px; }
 .heatmaps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-top: 30px; }
 .heatmap-wrap { border-top: 1px solid var(--rule); padding-top: 12px; min-width: 0; }
 .heatmap-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 10px; }
@@ -923,9 +927,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       <div class="chart-body">
         <div id="yAxis" class="y-axis" aria-label="Daily token y axis"></div>
         <div class="chart-stack">
-          <div id="chart" class="chart" aria-label="Daily token bars"></div>
+          <div id="chart" class="chart" aria-label="Daily token bars and reported cost curve"></div>
           <div id="chartAxis" class="chart-axis" aria-label="Daily token date axis"></div>
         </div>
+        <div id="costYAxis" class="y-axis cost-y-axis" aria-label="Daily cost y axis"></div>
       </div>
       <div class="legend">
         <span><i class="swatch" style="background:var(--in)"></i>input</span>
@@ -933,11 +938,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         <span><i class="swatch" style="background:var(--cw)"></i>cache write</span>
         <span><i class="swatch" style="background:var(--cr)"></i>cache read</span>
         <span><i class="swatch" style="background:var(--rz)"></i>reasoning</span>
+        <span><i class="swatch line" style="background:var(--gold)"></i>reported cost</span>
       </div>
-      <svg id="costline" class="costline" viewBox="0 0 1000 74" preserveAspectRatio="none" aria-label="Daily cost line"></svg>
     </div>
     <aside class="panel">
-      <h2>Service Mix</h2>
+      <h2>Provider Mix</h2>
       <div id="servicebar" class="servicebar"></div>
       <div id="services" class="service-list"></div>
       <div class="tokenmax">
@@ -945,7 +950,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         <div id="tokenmax" class="tokenmax-grid"></div>
         <div id="tokenmaxLine" class="tokenmax-line"></div>
       </div>
-      <p class="note">The service field is inferred from provider/model names, so Grok used through pi is counted as Grok while retaining source=pi.</p>
+      <p class="note">Provider mix groups usage by the model provider family: OpenAI, Claude, Gemini, Grok, opencode, and other ccusage-reported providers.</p>
     </aside>
   </section>
   <section class="heatmaps" aria-label="Daily heatmaps">
@@ -992,6 +997,11 @@ function selectedRows() { return (D.rows || []).filter(r => {
   const hostOk = state.hosts.includes('all') || state.hosts.length === 0 || rowHosts(r).some(host => state.hosts.includes(host));
   return (!state.from || r.date >= state.from) && (!state.to || r.date <= state.to) && hostOk;
 }); }
+function providerGroup(row) {
+  if (row.source === 'opencode') return 'opencode';
+  if (row.service === 'codex') return 'openai';
+  return row.service || row.provider || row.source || 'unknown';
+}
 function derive(rows) {
   const daysMap = new Map(), modelsMap = new Map(), servicesMap = new Map();
   rows.forEach(row => {
@@ -1001,13 +1011,15 @@ function derive(rows) {
     const modelKey = [row.service, row.provider, row.model].join('\u0000');
     if (!modelsMap.has(modelKey)) modelsMap.set(modelKey, {service: row.service, provider: row.provider, model: row.model, days: new Set(), sources: new Set(), hosts: new Set(), accounts: new Set(), records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
     const model = modelsMap.get(modelKey); addTotals(model, row); model.days.add(row.date); model.sources.add(row.source); (row.hosts || '').split(',').filter(Boolean).forEach(v => model.hosts.add(v)); (row.accounts || '').split(',').filter(Boolean).forEach(v => model.accounts.add(v));
-    const serviceKey = [row.source, row.service].join('\u0000');
-    if (!servicesMap.has(serviceKey)) servicesMap.set(serviceKey, {source: row.source, service: row.service, records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
-    addTotals(servicesMap.get(serviceKey), row);
+    const provider = providerGroup(row);
+    if (!servicesMap.has(provider)) servicesMap.set(provider, {provider, sources: new Set(), records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
+    const serviceBucket = servicesMap.get(provider);
+    serviceBucket.sources.add(row.source);
+    addTotals(serviceBucket, row);
   });
   const days = [...daysMap.values()].sort((a,b) => a.date.localeCompare(b.date));
   const models = [...modelsMap.values()].map(m => ({...m, days: m.days.size, sources: [...m.sources].sort(), hosts: [...m.hosts].sort(), accounts: [...m.accounts].sort()})).sort((a,b) => b.total_tokens - a.total_tokens);
-  const services = [...servicesMap.values()].sort((a,b) => b.total_tokens - a.total_tokens);
+  const services = [...servicesMap.values()].map(s => ({...s, sources: [...s.sources].sort()})).sort((a,b) => b.total_tokens - a.total_tokens);
   const summary = {records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0, active_models: models.length, first_date: days[0]?.date || '', latest_date: days.at(-1)?.date || ''};
   days.forEach(day => addTotals(summary, day));
   return {days, models, services, summary};
@@ -1044,19 +1056,21 @@ function yTicks(max) {
   }
   return [0, .25, .5, .75, 1].map(ratio => Math.round(max * ratio));
 }
-function renderYAxis(max) {
-  const axis = clear('yAxis');
+function renderYAxis(max, axisId, formatter, drawGrid) {
+  const axis = clear(axisId);
   const chart = document.getElementById('chart');
-  chart.querySelectorAll('.gridline').forEach(line => line.remove());
+  if (drawGrid) chart.querySelectorAll('.gridline').forEach(line => line.remove());
   yTicks(max).forEach(value => {
     const ratio = scaleRatio(value, max);
     const bottom = Math.max(0, Math.min(100, ratio * 100));
-    const tick = node('span', 'y-tick', fmt(value));
+    const tick = node('span', 'y-tick', formatter(value));
     tick.style.bottom = bottom + '%';
     axis.append(tick);
-    const line = node('i', 'gridline');
-    line.style.bottom = bottom + '%';
-    chart.append(line);
+    if (drawGrid) {
+      const line = node('i', 'gridline');
+      line.style.bottom = bottom + '%';
+      chart.append(line);
+    }
   });
 }
 function renderChartAxis(days) {
@@ -1073,13 +1087,39 @@ function renderChartAxis(days) {
     axis.append(tick);
   }
 }
+function renderCostOverlay(root, days, maxCost) {
+  renderYAxis(maxCost, 'costYAxis', usd, false);
+  if (!days.length || !maxCost) return;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'cost-overlay');
+  svg.setAttribute('viewBox', '0 0 1000 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  const points = days.map((d, i) => {
+    const x = days.length === 1 ? 0 : i * (1000 / (days.length - 1));
+    const y = 100 - (scaleRatio(Number(d.cost_usd || 0), maxCost) * 100);
+    return [x, y];
+  });
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', points.map(([x, y], index) => `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' '));
+  svg.append(path);
+  points.forEach(([x, y], index) => {
+    if (days.length > 120 && index % Math.ceil(days.length / 60) !== 0) return;
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', x.toFixed(1));
+    circle.setAttribute('cy', y.toFixed(1));
+    circle.setAttribute('r', '2.3');
+    svg.append(circle);
+  });
+  root.append(svg);
+}
 function renderChart(days) {
   const root = clear('chart');
-  const max = Math.max(1, ...days.map(d => Number(d.total_tokens || 0)));
-  renderYAxis(max);
+  const maxTokens = Math.max(1, ...days.map(d => Number(d.total_tokens || 0)));
+  const maxCost = Math.max(0, ...days.map(d => Number(d.cost_usd || 0)));
+  renderYAxis(maxTokens, 'yAxis', fmt, true);
   days.forEach(d => {
     const total = Number(d.total_tokens || 0);
-    const scaledTotal = scaleRatio(total, max) * 100;
+    const scaledTotal = scaleRatio(total, maxTokens) * 100;
     const day = node('div','day');
     day.title = `${d.date} · ${fmt(total)} tokens · ${usd(d.cost_usd)} · ${state.tokenScale} scale`;
     fields.forEach((f, idx) => {
@@ -1091,15 +1131,8 @@ function renderChart(days) {
     });
     root.append(day);
   });
+  renderCostOverlay(root, days, maxCost);
   renderChartAxis(days);
-}
-function renderCost(days) {
-  const svg = clear('costline');
-  const max = Math.max(0, ...days.map(d => Number(d.cost_usd || 0)));
-  if (!days.length || !max) { const t = document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('x','0'); t.setAttribute('y','38'); t.setAttribute('fill','#9d927f'); t.textContent = 'No reported cost data'; svg.append(t); return; }
-  const points = days.map((d, i) => { const x = days.length === 1 ? 0 : i * (1000 / (days.length - 1)); const y = 62 - (Number(d.cost_usd || 0) / max * 54); return `${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
-  const line = document.createElementNS('http://www.w3.org/2000/svg','polyline'); line.setAttribute('points', points); line.setAttribute('fill','none'); line.setAttribute('stroke','#d8a33d'); line.setAttribute('stroke-width','3'); line.setAttribute('vector-effect','non-scaling-stroke'); svg.append(line);
-  const t = document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('x','1000'); t.setAttribute('y','12'); t.setAttribute('text-anchor','end'); t.setAttribute('fill','#d8a33d'); t.textContent = 'max ' + usd(max); svg.append(t);
 }
 function renderServices(services) {
   const palette = ['#d8a33d','#8fb8b6','#577f86','#7d6c9f','#d66b55','#77b77a','#ede4d1'];
@@ -1108,8 +1141,8 @@ function renderServices(services) {
   const list = clear('services');
   services.forEach((row, idx) => {
     const color = palette[idx % palette.length];
-    const bit = node('div','servicebit'); bit.style.width = (Number(row.total_tokens || 0) / total * 100) + '%'; bit.style.background = color; bit.title = `${row.source}/${row.service} · ${fmt(row.total_tokens)}`; bar.append(bit);
-    const item = node('div','service-row'); const left = node('span','',`${row.source}/${row.service}`); left.style.color = color; item.append(left); item.append(node('span','',`${fmt(row.total_tokens)} · ${usd(row.cost_usd)}`)); list.append(item);
+    const bit = node('div','servicebit'); bit.style.width = (Number(row.total_tokens || 0) / total * 100) + '%'; bit.style.background = color; bit.title = `${row.provider} · ${fmt(row.total_tokens)} · via ${(row.sources || []).join(', ')}`; bar.append(bit);
+    const item = node('div','service-row'); const left = node('span','',row.provider || 'unknown'); left.style.color = color; item.append(left); item.append(node('span','',`${fmt(row.total_tokens)} · ${usd(row.cost_usd)}`)); list.append(item);
   });
 }
 function renderTokenmax(days, summary) {
@@ -1259,7 +1292,7 @@ function applyTokenScale() {
 }
 function renderAll() {
   const derived = derive(selectedRows());
-  renderStats(derived.summary); renderChart(derived.days); renderCost(derived.days); renderServices(derived.services); renderTokenmax(derived.days, derived.summary); renderHeatmaps(derived.days); renderModels(derived.models); renderHosts();
+  renderStats(derived.summary); renderChart(derived.days); renderServices(derived.services); renderTokenmax(derived.days, derived.summary); renderHeatmaps(derived.days); renderModels(derived.models); renderHosts();
   const readout = document.getElementById('rangeReadout');
   const hostText = state.hosts.includes('all') ? 'all hosts' : state.hosts.join(', ');
   readout.textContent = `${derived.days.length} days · ${derived.summary.first_date || 'n/a'} to ${derived.summary.latest_date || 'n/a'} · ${hostText}`;
