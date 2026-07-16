@@ -14,6 +14,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[audible-download.sh](docs/audible-download.md)** - Bulk download audiobooks from Audible with filtering options
 
 ### Development Tools
+- **[ai-usage-collect.py](docs/ai-usage-collect.md)** - Collect Claude Code, Codex, pi, opencode, and Grok usage from local/SSH hosts into cached JSON and CSV stats
 - **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, check runner/machine info, reviews, and bot activity (CodeRabbit, etc.)
 - **[env-diff.sh](docs/env-diff.md)** - Compare `.env` files in a gum table while redacting token-like values
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
@@ -47,6 +48,10 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ./check-pr.sh --concise  # Show only summary and items needing attention
 ./check-pr.sh /path/to/repo  # Check a PR from another repository directory
 
+# Collect AI coding-agent usage into raw and daily JSON/CSV stats
+./ai-usage-collect.py
+./ai-usage-collect.py --host eqr5 --host macbook=stone@macbook.local
+
 # Diff env files without printing token-like values
 ./env-diff.sh .env .env.example
 ./env-diff.sh --all .env.local .env.production
@@ -77,6 +82,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | audiobook-pipeline | `uvx`, `audible-cli`, `ffmpeg`, `gum` |
 | audiobook-split | `ffmpeg`, `gum` |
 | audible-download | `uvx`, `audible-cli`, `gum` |
+| ai-usage-collect | `python3`, `ssh` for remote hosts, `ccusage`/`npx` for Claude cost data |
 | check-pr | `uv`, `gh`, `git` |
 | env-diff | `gum`, `awk`, `sort` |
 | gi-select | `gum`, gitignore repository |
@@ -122,6 +128,7 @@ docs/
 ├── audiobook-pipeline.md    # Complete audiobook processing
 ├── audiobook-split.md       # Audio segmentation
 ├── audible-download.md      # Audible bulk downloads
+├── ai-usage-collect.md      # AI coding-agent usage collection
 ├── env-diff.md             # Secret-safe env file diffing
 ├── gi-select.md            # Interactive gitignore generation
 ├── highlight-manager.md     # Kindle highlights management
