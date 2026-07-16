@@ -15,6 +15,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 
 ### Development Tools
 - **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, check runner/machine info, reviews, and bot activity (CodeRabbit, etc.)
+- **[env-diff.sh](docs/env-diff.md)** - Compare `.env` files in a gum table while redacting token-like values
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
 
@@ -46,6 +47,10 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ./check-pr.sh --concise  # Show only summary and items needing attention
 ./check-pr.sh /path/to/repo  # Check a PR from another repository directory
 
+# Diff env files without printing token-like values
+./env-diff.sh .env .env.example
+./env-diff.sh --all .env.local .env.production
+
 # Generate .gitignore for Python project
 ./gi-select.sh  # Interactive selection
 
@@ -73,6 +78,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | audiobook-split | `ffmpeg`, `gum` |
 | audible-download | `uvx`, `audible-cli`, `gum` |
 | check-pr | `uv`, `gh`, `git` |
+| env-diff | `gum`, `awk`, `sort` |
 | gi-select | `gum`, gitignore repository |
 | highlight-manager | `duckdb`, `gum`, `jq`, `python3` |
 | simple-notify | `curl` |
@@ -116,6 +122,7 @@ docs/
 ├── audiobook-pipeline.md    # Complete audiobook processing
 ├── audiobook-split.md       # Audio segmentation
 ├── audible-download.md      # Audible bulk downloads
+├── env-diff.md             # Secret-safe env file diffing
 ├── gi-select.md            # Interactive gitignore generation
 ├── highlight-manager.md     # Kindle highlights management
 ├── simple-notify.md        # Simplepush notifications
