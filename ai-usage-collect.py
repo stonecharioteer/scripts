@@ -26,6 +26,7 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 DEFAULT_CACHE_DIR = ".ai-usage-cache"
+DEFAULT_INVENTORY = "ai-usage.hosts"
 DEFAULT_JSON = "ai-usage.json"
 DEFAULT_CSV = "ai-usage.csv"
 DEFAULT_DAILY_JSON = "ai-usage-daily.json"
@@ -1227,10 +1228,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Collect Claude Code, Codex, opencode, and pi usage into JSON/CSV without copying prompts."
     )
-    parser.add_argument("--inventory", type=Path, help="Host inventory file. Lines are 'label ssh-target account=name'.")
+    parser.add_argument("--inventory", type=Path, help=f"Host inventory file. Defaults to {DEFAULT_INVENTORY} next to this script when present.")
     parser.add_argument("--host", action="append", default=[], help="Remote host, or label=ssh-target. Can be repeated.")
     parser.add_argument("--no-local", action="store_true", help="Skip local collection.")
-    parser.add_argument("--cache-dir", type=Path, default=Path(DEFAULT_CACHE_DIR), help=f"Per-host cache directory, default {DEFAULT_CACHE_DIR}.")
+    parser.add_argument("--cache-dir", type=Path, help=f"Per-host cache directory. Defaults to {DEFAULT_CACHE_DIR} next to this script.")
     parser.add_argument("--output-json", type=Path, default=Path(DEFAULT_JSON), help=f"Combined JSON output, default {DEFAULT_JSON}.")
     parser.add_argument("--output-csv", type=Path, default=Path(DEFAULT_CSV), help=f"Combined CSV output, default {DEFAULT_CSV}.")
     parser.add_argument("--daily-json", type=Path, default=Path(DEFAULT_DAILY_JSON), help=f"Daily aggregate JSON output, default {DEFAULT_DAILY_JSON}.")
@@ -1259,9 +1260,17 @@ def main() -> int:
         print(json.dumps(collect_local(args.host_label, args.ccusage_runner), sort_keys=True))
         return 0
 
+    script_dir = Path(__file__).resolve().parent
+    cache_dir = args.cache_dir or script_dir / DEFAULT_CACHE_DIR
+
     specs = default_specs(not args.no_local)
-    if args.inventory:
-        specs.extend(parse_inventory(args.inventory))
+    inventory_path = args.inventory
+    if inventory_path is None:
+        inventory_path = script_dir / DEFAULT_INVENTORY
+    if inventory_path.exists():
+        specs.extend(parse_inventory(inventory_path))
+    elif args.inventory:
+        raise SystemExit(f"Inventory file not found: {inventory_path}")
     specs.extend(parse_host_arg(value) for value in args.host)
 
     # Later specs with the same label replace earlier ones, which lets inventory
@@ -1276,7 +1285,7 @@ def main() -> int:
     host_payloads: list[tuple[HostSpec, dict[str, Any], bool]] = []
     statuses: list[dict[str, Any]] = []
     for spec in specs:
-        payload, status = collect_host(spec, args.cache_dir, args.ssh_timeout, args.ccusage_runner)
+        payload, status = collect_host(spec, cache_dir, args.ssh_timeout, args.ccusage_runner)
         statuses.append(status)
         if payload is None:
             eprint(f"{spec.label}: no data ({status.get('message')})")

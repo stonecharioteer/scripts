@@ -31,13 +31,16 @@ Default outputs:
 | `ai-usage-daily.json` | Daily per-model aggregates |
 | `ai-usage-daily.csv` | CSV version of daily aggregates |
 | `ai-usage.html` | Self-contained static dashboard refreshed on each run |
-| `.ai-usage-cache/<host>.json` | Last successful snapshot for each host |
+| `.ai-usage-cache/<host>.json` | Last successful snapshot for each host, stored next to the script by default |
 
 ## Examples
 
 ```bash
-# Collect this machine only
+# Collect this machine plus hosts from ai-usage.hosts next to the script, when present
 ./ai-usage-collect.py
+
+# Collect this machine only
+./ai-usage-collect.py --inventory /dev/null
 
 # Collect local plus two SSH hosts
 ./ai-usage-collect.py --host eqr5 --host macbook=stone@macbook.local
@@ -54,6 +57,8 @@ Default outputs:
 # Skip the dashboard when only machine-readable data is needed
 ./ai-usage-collect.py --no-html
 ```
+
+When `--inventory` is not provided, the script looks for `ai-usage.hosts` in the same directory as `ai-usage-collect.py`. The local machine is included by default; inventory files are for additional SSH hosts.
 
 Inventory format:
 
@@ -93,7 +98,7 @@ The `source` column is the app that logged usage according to ccusage. The `serv
 
 ## Offline hosts
 
-Remote collection streams this script over SSH and runs `python3 - --collect-local` on the target. When SSH fails, the script loads `.ai-usage-cache/<host>.json` if it exists and marks those rows with `from_cache=true`.
+Remote collection streams this script over SSH and runs `python3 - --collect-local` on the target. When SSH fails, the script loads `.ai-usage-cache/<host>.json` next to the script by default if it exists and marks those rows with `from_cache=true`.
 
 Hosts with no cache and no successful SSH connection are skipped with a warning.
 

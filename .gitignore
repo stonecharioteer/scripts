@@ -9,6 +9,7 @@ clippings.json
 highlight-manager-broken.sh
 .ai-usage-cache/
 ai-usage.html
+ai-usage.hosts
 
 *.json
 *.tsv
