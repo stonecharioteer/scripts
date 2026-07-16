@@ -976,6 +976,11 @@ let state = { from: null, to: null, preset: 'all', hosts: ['all'], tokenScale: '
 function fmt(n) { n = Number(n || 0); if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return (n/1e3).toFixed(0)+'k'; return String(Math.round(n)); }
 function usd(n) { return '$' + Number(n || 0).toFixed(2); }
 function pct(n) { return Number(n || 0).toFixed(1) + '%'; }
+function providerCostLines(day) {
+  const costs = Object.entries(day.provider_costs || {}).filter(([, value]) => Number(value || 0) > 0).sort((a, b) => Number(b[1]) - Number(a[1]));
+  if (!costs.length) return ['provider cost: none reported'];
+  return ['provider cost', ...costs.map(([provider, value]) => `${provider}: ${usd(value)}`)];
+}
 function node(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; }
 function clear(id) { const el = document.getElementById(id); while (el.firstChild) el.removeChild(el.firstChild); return el; }
 function addTotals(target, row) { fields.concat(['total_tokens']).forEach(f => target[f] = Number(target[f] || 0) + Number(row[f] || 0)); target.cost_usd = Number(target.cost_usd || 0) + Number(row.cost_usd || 0); target.records = Number(target.records || 0) + Number(row.records || 0); target.sessions = Number(target.sessions || 0) + Number(row.sessions || 0); }
@@ -995,12 +1000,14 @@ function derive(rows) {
   const daysMap = new Map(), modelsMap = new Map(), servicesMap = new Map();
   rows.forEach(row => {
     if (!row.date) return;
-    if (!daysMap.has(row.date)) daysMap.set(row.date, {date: row.date, records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
-    addTotals(daysMap.get(row.date), row);
+    const provider = providerGroup(row);
+    if (!daysMap.has(row.date)) daysMap.set(row.date, {date: row.date, records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0, provider_costs:{}});
+    const dayBucket = daysMap.get(row.date);
+    addTotals(dayBucket, row);
+    dayBucket.provider_costs[provider] = Number(dayBucket.provider_costs[provider] || 0) + Number(row.cost_usd || 0);
     const modelKey = [row.service, row.provider, row.model].join('\u0000');
     if (!modelsMap.has(modelKey)) modelsMap.set(modelKey, {service: row.service, provider: row.provider, model: row.model, days: new Set(), sources: new Set(), hosts: new Set(), accounts: new Set(), records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
     const model = modelsMap.get(modelKey); addTotals(model, row); model.days.add(row.date); model.sources.add(row.source); (row.hosts || '').split(',').filter(Boolean).forEach(v => model.hosts.add(v)); (row.accounts || '').split(',').filter(Boolean).forEach(v => model.accounts.add(v));
-    const provider = providerGroup(row);
     if (!servicesMap.has(provider)) servicesMap.set(provider, {provider, sources: new Set(), records:0, sessions:0, input_tokens:0, output_tokens:0, cache_creation_tokens:0, cache_read_tokens:0, reasoning_tokens:0, total_tokens:0, cost_usd:0});
     const serviceBucket = servicesMap.get(provider);
     serviceBucket.sources.add(row.source);
@@ -1152,6 +1159,7 @@ function renderChart(days) {
         `${fmt(day.input_tokens)} in · ${fmt(day.output_tokens)} out`,
         `${fmt((day.cache_creation_tokens || 0) + (day.cache_read_tokens || 0))} cache`,
         `${usd(day.cost_usd)} reported cost`,
+        ...providerCostLines(day),
         `${state.tokenScale} scale`,
       ]);
     });
@@ -1226,13 +1234,13 @@ function renderHeatmap(rootId, monthsId, maxId, days, field, formatter, costMode
     for (let i = 0; i < firstDow; i += 1) root.append(node('i', 'cell empty'));
   }
   calendar.forEach(date => {
-    const day = byDate.get(date) || {date, total_tokens: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, reasoning_tokens: 0};
+    const day = byDate.get(date) || {date, total_tokens: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, reasoning_tokens: 0, provider_costs: {}};
     const value = Number(day[field] || 0);
     const level = heatLevel(value, max);
     const cell = node('i', `cell${costMode ? ' cost' : ''}${level ? ' l' + level : ''}`);
     const lines = costMode
-      ? [date, `${formatter(value)} reported cost`, `${fmt(day.total_tokens || 0)} tokens`]
-      : [date, `${formatter(value)} total tokens`, `${fmt(day.input_tokens || 0)} in · ${fmt(day.output_tokens || 0)} out`, `${fmt((day.cache_creation_tokens || 0) + (day.cache_read_tokens || 0))} cache · ${usd(day.cost_usd || 0)}`];
+      ? [date, `${formatter(value)} reported cost`, `${fmt(day.total_tokens || 0)} tokens`, ...providerCostLines(day)]
+      : [date, `${formatter(value)} total tokens`, `${fmt(day.input_tokens || 0)} in · ${fmt(day.output_tokens || 0)} out`, `${fmt((day.cache_creation_tokens || 0) + (day.cache_read_tokens || 0))} cache · ${usd(day.cost_usd || 0)}`, ...providerCostLines(day)];
     cell.setAttribute('aria-label', lines.join(' · '));
     cell.addEventListener('mouseenter', event => showHover(event, lines));
     cell.addEventListener('mousemove', moveHover);

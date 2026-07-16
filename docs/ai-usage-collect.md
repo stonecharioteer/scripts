@@ -78,8 +78,8 @@ The dashboard is a single file with embedded CSS, aggregate data, and local Java
 - total, input, output, cache, cost, model count, and latest date
 - an All / 7D / 30D / 90D / 1Y / custom date selector plus a host filter defaulting to all hosts
 - D3-rendered daily token flow bars split by input/output/cache/reasoning, with a left token Y axis and log/linear scale toggle
-- an overlaid reported-cost curve on the same D3 date axis, with a right cost Y axis using the same scale mode and hover values anywhere on the plot
-- GitHub-style daily heatmaps for token volume and reported cost, with month markers and hover values
+- an overlaid reported-cost curve on the same D3 date axis, with a right cost Y axis using the same scale mode and hover values anywhere on the plot, including provider-by-provider cost for that date
+- GitHub-style daily heatmaps for token volume and reported cost, with month markers and hover values including provider-by-provider cost for that date
 - provider mix grouped by model provider family, including Grok usage logged through pi
 - a Tokenmaxxing panel with peak day, average tokens/day, cache multiplier, and output share
 - top models by token volume
