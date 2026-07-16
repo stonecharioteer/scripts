@@ -78,16 +78,27 @@ def as_float(value: Any) -> float:
         return 0.0
 
 
+def clean_ccusage_model_name(model: str) -> str:
+    return re.sub(r"^\[[^\]]+\]\s*", "", model).strip()
+
+
 def infer_service(source: str, provider: str, model: str) -> str:
-    haystack = f"{source} {provider} {model}".lower()
+    normalized_model = clean_ccusage_model_name(model).lower()
+    haystack = f"{source} {provider} {normalized_model}".lower()
     if "grok" in haystack or "xai" in haystack or "x.ai" in haystack:
         return "grok"
     if "claude" in haystack or "anthropic" in haystack:
         return "claude"
     if "codex" in haystack:
         return "codex"
-    if "openai" in haystack or model.startswith("gpt-") or model.startswith("o"):
+    if "gemini" in haystack:
+        return "gemini"
+    if "openai" in haystack or normalized_model.startswith("gpt-") or normalized_model.startswith("o"):
         return "openai"
+    if "kimi" in haystack:
+        return "kimi"
+    if "qwen" in haystack:
+        return "qwen"
     return source
 
 
@@ -213,7 +224,7 @@ def collect_ccusage_unified(home: Path, mode: str = "auto") -> list[dict[str, An
                 for breakdown in breakdowns:
                     if not isinstance(breakdown, dict):
                         continue
-                    model = str(breakdown.get("modelName") or "")
+                    model = clean_ccusage_model_name(str(breakdown.get("modelName") or ""))
                     records.append(
                         new_record(
                             source=source,
@@ -820,18 +831,21 @@ h1 { margin: 0; font-size: clamp(38px, 7vw, 92px); line-height: .88; letter-spac
 .rangebar button.active, .rangebar button:hover, .rangebar input:focus, .rangebar select:focus { border-color: var(--gold); outline: 0; }
 .custom-range { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .range-readout { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin-left: 6px; }
-.grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 28px; margin-top: 30px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 28px; margin-top: 30px; align-items: start; }
 .panel { border-top: 1px solid var(--rule-strong); padding-top: 14px; min-width: 0; }
+.flow-panel { overflow: hidden; padding-bottom: 8px; }
 .panel h2 { margin: 0 0 14px; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
 .chart { display: flex; align-items: flex-end; gap: 3px; height: 230px; padding: 10px 0 0; border-bottom: 1px solid var(--rule); }
 .day { flex: 1 1 3px; min-width: 3px; height: 100%; display: flex; flex-direction: column-reverse; justify-content: flex-start; opacity: .94; }
 .day:hover { outline: 1px solid var(--gold); outline-offset: 2px; opacity: 1; }
 .seg.in { background: var(--in); } .seg.out { background: var(--out); } .seg.cw { background: var(--cw); } .seg.cr { background: var(--cr); } .seg.rz { background: var(--rz); }
-.chart-axis { position: relative; height: 18px; margin-top: 6px; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.chart-axis { position: relative; height: 22px; margin: 8px 0 12px; overflow: hidden; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .axis-tick { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.axis-tick:first-child { transform: translateX(0); }
+.axis-tick:last-child { transform: translateX(-100%); }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
-.costline { width: 100%; height: 74px; margin-top: 8px; overflow: visible; }
+.costline { display: block; width: 100%; height: 74px; margin-top: 10px; overflow: hidden; }
 .heatmaps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-top: 30px; }
 .heatmap-wrap { border-top: 1px solid var(--rule); padding-top: 12px; min-width: 0; }
 .heatmap-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 10px; }
@@ -892,7 +906,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     </div>
   </section>
   <section class="grid">
-    <div class="panel">
+    <div class="panel flow-panel">
       <h2>Daily Token Flow</h2>
       <div id="chart" class="chart" aria-label="Daily token bars"></div>
       <div id="chartAxis" class="chart-axis" aria-label="Daily token date axis"></div>
@@ -929,7 +943,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       <div class="heatmap-legend"><span>less</span><i class="cell cost"></i><i class="cell cost l1"></i><i class="cell cost l2"></i><i class="cell cost l3"></i><i class="cell cost l4"></i><span>more</span></div>
     </div>
   </section>
-  <section class="panel" style="margin-top:30px">
+  <section class="panel" style="margin-top:42px">
     <h2>Top Models</h2>
     <table>
       <thead><tr><th>Model</th><th class="num">Days</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache</th><th class="num">Total</th><th class="num">Cost</th></tr></thead>
@@ -1122,6 +1136,12 @@ function hostSummary(hosts) {
   if (list.length <= 3) return list.join(', ');
   return `${list.slice(0, 3).join(', ')} +${list.length - 3}`;
 }
+function routeSummary(row) {
+  const sources = (row.sources || []).filter(Boolean);
+  const via = sources.length ? `via ${sources.join(', ')}` : '';
+  const service = row.service || '';
+  return [service, via, hostSummary(row.hosts)].filter(Boolean).join(' · ');
+}
 function renderModels(models) {
   const body = clear('models');
   models.slice(0, 30).forEach(row => {
@@ -1129,7 +1149,7 @@ function renderModels(models) {
     const name = document.createElement('td');
     name.title = `sources: ${(row.sources || []).join(', ')}; hosts: ${(row.hosts || []).join(', ')}; accounts: ${(row.accounts || []).join(', ')}`;
     name.append(node('div','model-name',row.model || 'unknown'));
-    name.append(node('div','meta',`${row.service || 'unknown'} ${row.provider ? '· '+row.provider : ''} · ${hostSummary(row.hosts)}`));
+    name.append(node('div','meta',routeSummary(row)));
     tr.append(name);
     [['days',fmt(row.days)],['input',fmt(row.input_tokens)],['output',fmt(row.output_tokens)],['cache',fmt(Number(row.cache_creation_tokens || 0)+Number(row.cache_read_tokens || 0))],['total',fmt(row.total_tokens)],['cost',usd(row.cost_usd)]].forEach(([, value]) => tr.append(node('td','num',value)));
     body.append(tr);
