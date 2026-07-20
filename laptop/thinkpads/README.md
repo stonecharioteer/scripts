@@ -83,9 +83,6 @@ sudo ./free-dpkg-lock.sh
 ./investigate-partitions.sh reports/partition-report-$(hostname)-$(date +%Y%m%d-%H%M%S).txt
 ```
 
-## Reports
-
-`reports/partition-report-*.txt` — saved outputs from earlier partition investigations (historical hostnames may appear in filenames).
 
 ## After path moves
 
