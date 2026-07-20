@@ -1,6 +1,7 @@
 # Agent Notes for `laptop/x13-flow`
 
-This folder contains RCA notes and utility scripts for running the ASUS ROG X13 Flow (`rog-x13-flow`) as a mostly headless/tent-mode server.
+This folder contains RCA notes and utility scripts for running the ASUS ROG X13
+Flow as a mostly headless/tent-mode server.
 
 ## Current state
 
@@ -14,16 +15,36 @@ This folder contains RCA notes and utility scripts for running the ASUS ROG X13 
 - `supergfxctl` graphics mode should be `Integrated`.
 - LightDM/display manager may be disabled; machine may run in `multi-user.target`.
 
+## Prefer Ansible over shell installers
+
+On hosts managed by distributed-dotfiles, use the `laptop-health` role / laptop
+tags instead of re-running `setup-*.sh` installers. Keep using runtime helpers
+(`screen.sh`, `stats.sh`) day-to-day.
+
+See [`README.md`](README.md) for the full script ↔ inventory-flag map.
+
 ## Important files
 
-- `laptop-hang-rca.md` — primary RCA/timeline; update this after meaningful findings.
-- `screen.sh` — headless/tent-mode panel control:
-  - `./screen.sh --off`
-  - `./screen.sh --on`
-  - `./screen.sh --status`
-- `setup-hang-monitoring.sh` — installs `/var/log/hang-health.log` collection.
-- `setup-panic-on-oops.sh` — configures auto-reboot after kernel oops/panic.
-- `set-grub-kernel-6.8.0-90.sh` — sets GRUB default to older stable-test kernel.
+### Runtime / docs
+
+- `README.md` — full script inventory and Ansible mapping
+- `laptop-hang-rca.md` — primary RCA/timeline; update after meaningful findings
+- `screen.sh` — headless/tent-mode panel control (`--off` / `--on` / `--status` / `--apply-off`)
+- `stats.sh` / `stats.py` — hang-health log UI
+
+### Manual installers (fallback to Ansible `laptop-health`)
+
+- `setup-hang-monitoring.sh` — `/var/log/hang-health.log` collection
+- `setup-nvme-health-monitoring.sh` — NVMe SMART snapshots
+- `setup-lid-ignore.sh` — logind lid ignore
+- `setup-panic-on-oops.sh` — auto-reboot after kernel oops/panic
+- `setup-reboot-investigation.sh` — broader panic/pstore investigation tooling
+- `install-screen-keepoff-service.sh` — systemd keep-off unit calling `screen.sh`
+- `enable-lightdm-display-sleep.sh` — greeter DPMS hooks
+- `disable-nvidia-dgpu.sh` — integrated GPU mode
+- `fix-blacklist-nouveau.sh` — nouveau blacklist cleanup
+- `install-asus-linux-tools.sh` — supergfxctl/asusctl from source
+- `set-grub-kernel-6.8.0-90.sh` — pin GRUB to mitigation kernel
 
 ## Investigation pattern after a hang/reboot
 
