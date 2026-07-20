@@ -1017,13 +1017,13 @@ raw snapshot sha256: 0941eba116c446bc1a1238b4eaacddf6ed570ad1b857b29bc8385b08fdc
 zstd artifact sha256: 4761f761dcd8940fa54e40734bee75b94c0248459b5ad1137fb68e37c51a2928
 ```
 
-| Sensor | Samples | Min °C | P25 °C | P50 °C | P75 °C | P90 °C | P95 °C | P99 °C | Max °C |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| CPU Tctl | 36596 | 33.4 | 40.1 | 41.6 | 43.8 | 51.9 | 53.1 | 67.2 | 93.9 |
-| thermal_zone0 | 36596 | 33.0 | 39.0 | 41.0 | 43.0 | 51.0 | 52.0 | 67.0 | 94.0 |
-| AMD GPU edge | 36596 | 32.0 | 40.0 | 41.0 | 43.0 | 51.0 | 52.0 | 56.0 | 77.0 |
-| NVMe Composite | 36596 | 28.9 | 31.9 | 31.9 | 32.9 | 36.9 | 36.9 | 38.9 | 51.9 |
-| iwlwifi | 36596 | 34.0 | 38.0 | 39.0 | 42.0 | 50.0 | 51.0 | 54.0 | 66.0 |
+| Sensor         | Samples | Min °C | P25 °C | P50 °C | P75 °C | P90 °C | P95 °C | P99 °C | Max °C |
+| -------------- | ------: | -----: | -----: | -----: | -----: | -----: | -----: | -----: | -----: |
+| CPU Tctl       |   36596 |   33.4 |   40.1 |   41.6 |   43.8 |   51.9 |   53.1 |   67.2 |   93.9 |
+| thermal_zone0  |   36596 |   33.0 |   39.0 |   41.0 |   43.0 |   51.0 |   52.0 |   67.0 |   94.0 |
+| AMD GPU edge   |   36596 |   32.0 |   40.0 |   41.0 |   43.0 |   51.0 |   52.0 |   56.0 |   77.0 |
+| NVMe Composite |   36596 |   28.9 |   31.9 |   31.9 |   32.9 |   36.9 |   36.9 |   38.9 |   51.9 |
+| iwlwifi        |   36596 |   34.0 |   38.0 |   39.0 |   42.0 |   50.0 |   51.0 |   54.0 |   66.0 |
 
 Final decision: Linux on this ASUS X13 Flow is not worth further time for this use case. Treat the
 machine as a Windows gaming PC and move Linux/server workloads to more stable hardware.
