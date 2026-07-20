@@ -6,7 +6,12 @@ The script walks the current directory by default and infers destinations like:
     Artist/Album (Year)/01 - Track.ext
     Artist/Album (Year)/Disc 01/01 - Track.ext
 
-It is dry-run by default. Pass --apply to move files.
+Path/name heuristics only (no tag reading). Dry-run by default:
+
+    --apply                 move planned files
+    --delete-duplicates     permanently delete exact duplicate sources
+
+See homelab/jellyfin/README.md for usage and risks.
 """
 
 from __future__ import annotations
@@ -125,7 +130,6 @@ class Plan:
 
 
 def clean_spaces(value: str) -> str:
-    value = value.replace(r"\(", "(").replace(r"\)", ")")
     value = value.replace("_", " ")
     value = re.sub(r"\s+", " ", value)
     return value.strip(" .-_")
@@ -422,6 +426,8 @@ def target_for_path(rel_path: Path, include_podcasts: bool) -> Union[Destination
 
 
 def is_relative_to(path: Path, parent: Path) -> bool:
+    if hasattr(path, "is_relative_to"):
+        return path.is_relative_to(parent)
     try:
         path.relative_to(parent)
         return True
@@ -563,6 +569,7 @@ def apply_plan(
     destinations: list[Destination],
     deletes: list[Delete],
     overwrite: bool,
+    delete_duplicates: bool,
 ) -> tuple[int, int, int]:
     moved = 0
     unchanged = 0
@@ -586,40 +593,81 @@ def apply_plan(
         shutil.move(str(source), str(target))
         moved += 1
 
-    for item in deletes:
-        source = source_root / item.source
-        if not source.exists():
-            continue
-        if not source.is_file():
-            raise FileExistsError(f"Refusing to delete non-file duplicate source: {source}")
-        source.unlink()
-        deleted += 1
+    if delete_duplicates:
+        for item in deletes:
+            source = source_root / item.source
+            if not source.exists():
+                continue
+            if not source.is_file():
+                raise FileExistsError(f"Refusing to delete non-file duplicate source: {source}")
+            source.unlink()
+            deleted += 1
 
     return moved, unchanged, deleted
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Organize music files for Jellyfin.")
-    parser.add_argument("--source-root", type=Path, default=Path("."), help="Messy music root to scan. Default: current directory.")
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Organize music files for Jellyfin (path heuristics; dry-run by default)."
+    )
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        default=Path("."),
+        help="Messy music root to scan. Default: current directory.",
+    )
     parser.add_argument(
         "--dest-root",
         type=Path,
         default=None,
-        help="Destination Jellyfin music root. Default: ./jellyfin-organized inside the source root.",
+        help="Destination Jellyfin music root. Default: <source-root>/jellyfin-organized.",
     )
-    parser.add_argument("--report", type=Path, default=Path("music-organize-plan.csv"), help="CSV report path.")
-    parser.add_argument("--include-podcasts", action="store_true", help="Include folders with Podcast in the name.")
-    parser.add_argument("--apply", action="store_true", help="Actually move files. Default is dry-run.")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing destination files when applying.")
-    parser.add_argument("--limit", type=int, default=0, help="Only process the first N discovered files, useful for testing.")
-    return parser.parse_args()
+    parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="CSV report path. Default: <source-root>/music-organize-plan.csv.",
+    )
+    parser.add_argument(
+        "--include-podcasts",
+        action="store_true",
+        help="Include folders with Podcast in the name.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually move planned files. Default is dry-run.",
+    )
+    parser.add_argument(
+        "--delete-duplicates",
+        action="store_true",
+        help=(
+            "Permanently delete exact-duplicate source files identified in the plan. "
+            "Requires --apply. Without this flag, duplicates are reported only."
+        ),
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing destination files when applying moves.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Only process the first N discovered files, useful for testing.",
+    )
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(argv)
+    if args.delete_duplicates and not args.apply:
+        raise SystemExit("--delete-duplicates requires --apply")
+
     source_root = args.source_root.expanduser().resolve()
     dest_root = (args.dest_root.expanduser() if args.dest_root else source_root / "jellyfin-organized").resolve()
-    report_path = args.report.expanduser().resolve()
+    report_path = (args.report.expanduser() if args.report else source_root / "music-organize-plan.csv").resolve()
 
     if not source_root.is_dir():
         raise SystemExit(f"Source root is not a directory: {source_root}")
@@ -642,26 +690,54 @@ def main() -> int:
     print(f"Planned moves: {len(plan.destinations)}")
     print(f"Exact duplicate deletes: {len(plan.deletes)}")
     print(f"Skipped: {len(plan.skips)}")
-    print(f"Collision renames: {len(plan.warnings)}")
+    print(f"Collision renames/warnings: {len(plan.warnings)}")
     print(f"Report: {report_path}")
 
     for item in plan.destinations[:20]:
-        print(f"{item.source} -> {item.target}")
+        print(f"MOVE  {item.source} -> {item.target}")
     if len(plan.destinations) > 20:
-        print(f"... {len(plan.destinations) - 20} more planned moves")
+        print(f"... {len(plan.destinations) - 20} more planned moves (see CSV)")
+
+    if plan.deletes:
+        print("Exact duplicates (delete candidates):")
+        for item in plan.deletes[:20]:
+            print(f"DELETE {item.source}  ({item.reason})")
+        if len(plan.deletes) > 20:
+            print(f"... {len(plan.deletes) - 20} more deletes (see CSV)")
 
     if plan.warnings:
         print("Warnings:")
         for warning in plan.warnings[:10]:
             print(f"  {warning}")
         if len(plan.warnings) > 10:
-            print(f"  ... {len(plan.warnings) - 10} more warnings")
+            print(f"  ... {len(plan.warnings) - 10} more warnings (see CSV)")
 
     if not args.apply:
         print("Dry run only. Re-run with --apply to move files.")
+        if plan.deletes:
+            print(
+                f"Note: {len(plan.deletes)} exact duplicate(s) listed. "
+                "They are NOT deleted unless you pass --apply --delete-duplicates."
+            )
         return 0
 
-    moved, unchanged, deleted = apply_plan(source_root, dest_root, plan.destinations, plan.deletes, args.overwrite)
+    if plan.deletes and not args.delete_duplicates:
+        print(
+            f"Applying moves only. {len(plan.deletes)} exact duplicate(s) left in place; "
+            "re-run with --delete-duplicates to remove them."
+        )
+
+    if args.delete_duplicates and plan.deletes:
+        print(f"WARNING: permanently deleting {len(plan.deletes)} exact duplicate source file(s).")
+
+    moved, unchanged, deleted = apply_plan(
+        source_root,
+        dest_root,
+        plan.destinations,
+        plan.deletes,
+        args.overwrite,
+        args.delete_duplicates,
+    )
     print(f"Moved files: {moved}")
     print(f"Already in place: {unchanged}")
     print(f"Deleted exact duplicates: {deleted}")
