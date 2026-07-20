@@ -14,14 +14,21 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[audible-download.sh](docs/audible-download.md)** - Bulk download audiobooks from Audible with filtering options
 
 ### Development Tools
+- **[ai-usage-collect.py](docs/ai-usage-collect.md)** - Collect ccusage-backed AI coding stats from local/SSH hosts in parallel into append-only per-host ledgers, JSON/CSV, an offline-capable responsive dashboard, and a shareable PNG infographic; run via `ai-usage.sh` so uv resolves matplotlib
+- **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, check runner/machine info, reviews, and bot activity (CodeRabbit, etc.)
+- **[env-diff.sh](docs/env-diff.md)** - Compare `.env` files in a gum table while redacting token-like values
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
+
+### Notifications
+- **[simple-notify.sh](docs/simple-notify.md)** - Send Simplepush notifications with curl and a JSON payload
 
 ### Infrastructure Monitoring
 - **[power-monitor](docs/power-monitor.md)** - House and room-level power monitoring with backup-aware logic and MAC validation
 
 ### System Configuration
 - **[set-locale.sh](docs/set-locale.md)** - Configure en_US.UTF-8 locale with cleanup options for unused locales
+- **[laptop/](laptop/README.md)** - Laptop helpers for distributed-dotfiles (`thinkpads/` headless tools, `x13-flow/` screen/health helpers)
 
 ## 🎯 Quick Start Examples
 
@@ -35,8 +42,25 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 # Download recent Audible purchases
 ./audible-download.sh --start-date "2024-01-01" --all
 
+# Check status of open PR for current branch
+./check-pr.sh  # Show one-line merge status plus checks and bot reviews
+./check-pr.sh -w  # Watch mode, refresh every 30 seconds
+./check-pr.sh --concise  # Show only summary and items needing attention
+./check-pr.sh /path/to/repo  # Check a PR from another repository directory
+
+# Collect AI coding-agent usage into JSON/CSV stats, ai-usage.html, and a shareable infographic
+./ai-usage.sh
+./ai-usage.sh --host eqr5 --host macbook=stone@macbook.local
+
+# Diff env files without printing token-like values
+./env-diff.sh .env .env.example
+./env-diff.sh --all .env.local .env.production
+
 # Generate .gitignore for Python project
 ./gi-select.sh  # Interactive selection
+
+# Send a Simplepush notification
+./simple-notify.sh "Build finished"
 
 # Import Kindle highlights from multiple devices
 ./highlight-manager.sh import kindle_*.txt koreader_*.txt
@@ -58,10 +82,16 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | audiobook-pipeline | `uvx`, `audible-cli`, `ffmpeg`, `gum` |
 | audiobook-split | `ffmpeg`, `gum` |
 | audible-download | `uvx`, `audible-cli`, `gum` |
+| ai-usage-collect | `uv` (matplotlib for the infographic), `ssh` for remote hosts, `ccusage`/`npx` for unified usage and cost data |
+| check-pr | `uv`, `gh`, `git` |
+| env-diff | `gum`, `awk`, `sort` |
 | gi-select | `gum`, gitignore repository |
 | highlight-manager | `duckdb`, `gum`, `jq`, `python3` |
+| simple-notify | `curl` |
 | power-monitor | `duckdb`, `ping`, `arp`, `jq`, `gum` |
 | set-locale | `locale-gen`, `sudo` access |
+| laptop/thinkpads | `nmcli`, `systemctl`, sysfs battery thresholds |
+| laptop/x13-flow | `gum`, `uv`, `systemctl`, distributed-dotfiles laptop-health role |
 
 ## 🏗️ Installation
 
@@ -99,8 +129,11 @@ docs/
 ├── audiobook-pipeline.md    # Complete audiobook processing
 ├── audiobook-split.md       # Audio segmentation
 ├── audible-download.md      # Audible bulk downloads
+├── ai-usage-collect.md      # AI coding-agent usage collection
+├── env-diff.md             # Secret-safe env file diffing
 ├── gi-select.md            # Interactive gitignore generation
 ├── highlight-manager.md     # Kindle highlights management
+├── simple-notify.md        # Simplepush notifications
 ├── power-monitor.md        # Power monitoring system
 ├── set-locale.md           # System locale configuration
 └── til/                    # Today I Learned entries

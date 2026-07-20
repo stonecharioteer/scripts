@@ -7,7 +7,50 @@ myClippings.txt
 *.temp
 clippings.json
 highlight-manager-broken.sh
+.ai-usage-cache/
+ai-usage.html
+ai-usage.hosts
 
+# Generated AI usage outputs (regenerable)
 *.json
 *.tsv
 *.csv
+ai-usage.json
+ai-usage.csv
+ai-usage-daily.json
+ai-usage-daily.csv
+ai-usage-infographic.png
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Logs and local dumps
+*.log
+music.log
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Node (if prettier/local tooling ever drops files here)
+node_modules/
