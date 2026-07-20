@@ -24,7 +24,8 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 
 ### Notifications
 
-- **[simple-notify.sh](docs/simple-notify.md)** - Send Simplepush notifications with curl and a JSON payload
+- **[ntfy.sh](docs/ntfy.md)** - Publish notifications to the self-hosted ntfy server at `ntfy.home.arpa` (default topic: `alerts`; common topics: `agents`, `chores`)
+- **[simple-notify.sh](docs/simple-notify.md)** - Legacy Simplepush notifications with curl and a JSON payload
 
 ### Infrastructure Monitoring
 
@@ -65,7 +66,12 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 # Generate .gitignore for Python project
 ./gi-select.sh  # Interactive selection
 
-# Send a Simplepush notification
+# Send an ntfy notification
+./ntfy.sh "Quick alert to the default alerts topic"
+./ntfy.sh agents "Agent done: tests passed"
+./ntfy.sh chores "Take out trash bins tonight"
+
+# Legacy Simplepush notification
 ./simple-notify.sh "Build finished"
 
 # Import Kindle highlights from multiple devices
@@ -93,6 +99,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | env-diff           | `gum`, `awk`, `sort`                                                                                           |
 | gi-select          | `gum`, gitignore repository                                                                                    |
 | highlight-manager  | `duckdb`, `gum`, `jq`, `python3`                                                                               |
+| ntfy               | `curl`                                                                                                         |
 | simple-notify      | `curl`                                                                                                         |
 | power-monitor      | `duckdb`, `ping`, `arp`, `jq`, `gum`                                                                           |
 | set-locale         | `locale-gen`, `sudo` access                                                                                    |
@@ -141,6 +148,7 @@ docs/
 ├── env-diff.md             # Secret-safe env file diffing
 ├── gi-select.md            # Interactive gitignore generation
 ├── highlight-manager.md     # Kindle highlights management
+├── ntfy.md                 # Self-hosted ntfy notifications
 ├── simple-notify.md        # Simplepush notifications
 ├── power-monitor.md        # Power monitoring system
 ├── set-locale.md           # System locale configuration
