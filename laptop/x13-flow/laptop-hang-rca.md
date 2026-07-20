@@ -2,13 +2,13 @@
 title: Laptop Hang RCA Notes
 host: rog-x13-flow
 initial_date: 2026-06-21
-last_updated: 2026-07-02
+last_updated: 2026-07-07
 os_stack: Linux Mint / Ubuntu
 problem_kernel: 6.8.0-110-generic
 current_mitigation_kernel: 6.8.0-90-generic
 current_status:
-  Running 6.8.0-90-generic after a sudden unclean reboot on 2026-07-02 with no preserved final
-  cause; reboot-investigation tooling prepared.
+  Running 6.8.0-90-generic after sudden unclean reboots on 2026-07-02 and 2026-07-07 with no
+  preserved final panic/oops cause; pstore did not capture the July 7 event.
 key_events:
   - date: 2026-06-21
     summary:
@@ -27,6 +27,11 @@ key_events:
     summary:
       Sudden unclean reboot on 6.8.0-90-generic; no oops/panic/OOM/thermal evidence preserved; added
       script to enable pstore archival, stronger panic-on-lockup sysctls, and timer dephasing.
+  - date: 2026-07-07
+    summary:
+      Second sudden unclean reboot on 6.8.0-90-generic; previous boot stopped abruptly at 17:43:48,
+      current boot began at 17:46:17; pstore empty; health snapshots showed no OOM, thermal, or disk
+      fault, but Docker/GitHub runner churn was high near the final logs.
 ---
 
 # Laptop Hang RCA Notes
@@ -203,6 +208,100 @@ sudo grep -R . /var/log/pstore-archive /sys/fs/pstore 2>/dev/null | less
 journalctl -b -1 -k --no-pager | tail -300
 last -x | head -30
 ```
+
+### 2026-07-07 second sudden unclean reboot on `6.8.0-90-generic`
+
+The laptop rebooted unexpectedly again while still on the rollback kernel:
+
+```text
+Current kernel after reboot: 6.8.0-90-generic
+Previous boot: Thu 2026-07-02 13:13:08 IST → Tue 2026-07-07 17:43:48 IST
+Current boot:  Tue 2026-07-07 17:46:17 IST
+Observed uptime after reconnect: ~1-2 minutes
+```
+
+The reboot was unclean. The current boot logged journal corruption/replacement:
+
+```text
+systemd-journald[444]: File /var/log/journal/.../system.journal corrupted or uncleanly shut down, renaming and replacing.
+```
+
+The previous boot journal ended abruptly at `17:43:48`; there was no clean shutdown/reboot sequence
+before the new boot at `17:46:17`. Searches did not find a preserved final cause:
+
+```text
+No kernel panic/oops in the final previous-boot journal.
+No OOM/out-of-memory evidence.
+No thermal critical event.
+No NVMe I/O errors, media errors, or SMART critical warnings.
+No pstore files under /sys/fs/pstore or /var/log/pstore-archive.
+```
+
+The last previous-boot log entries were dominated by Docker/container activity and GitHub Actions
+runner conflicts:
+
+```text
+Jul 07 17:43:46 dockerd: healthcheck failed fatally: ... only one connection allowed
+Jul 07 17:43:46 systemd: Started docker-...scope
+Jul 07 17:43:46 kernel: br-f359ba95c655: port ... entered forwarding state
+Jul 07 17:43:48 avahi-daemon: Registering new address record for ... on veth...
+Jul 07 17:43:48 systemd: var-lib-docker-overlay2-...-init-merged.mount: Deactivated successfully.
+```
+
+The health snapshots immediately before the reboot did not show classic resource exhaustion:
+
+```text
+snapshot: 2026-07-07T17:43:34+05:30
+uptime: 5 days, 4:31
+load average: 4.61, 1.74, 0.92
+memory: ~25 GiB available, swap ~512 KiB used
+root disk: 53% used
+AC online: 1
+battery: 57%, status=Charging, threshold=60, power_now≈7.3 W
+thermal_zone0: 68°C
+thermal_zone1: 20°C
+thermal_zone2/iwlwifi: 50°C
+```
+
+The next health snapshot was after reboot:
+
+```text
+snapshot: 2026-07-07T17:46:47+05:30
+uptime: 2 min
+memory: ~28 GiB available, swap 0B used
+battery: 59%, status=Discharging
+thermal_zone0: 68°C
+thermal_zone2/iwlwifi: 52°C
+```
+
+Daily NVMe health logging showed the disk itself was healthy near the event:
+
+```text
+SMART overall-health self-assessment: PASSED
+critical_warning: 0
+media_errors: 0
+num_err_log_entries: 0
+temperature: 33°C
+percentage_used: 2%
+```
+
+Interpretation: this matches the 2026-07-02 pattern more than the 2026-06-23
+`6.8.0-110-generic` oops pattern. It appears to be a sudden reset/firmware-level reboot/kernel
+hang where logs were not flushed, not an orderly shutdown and not an observed Linux OOM/thermal/NVMe
+failure. Docker/GitHub-runner churn was the most prominent workload near the final logs, but it is
+not proven as the root cause; it may only be the workload that made a latent kernel/firmware/power
+bug easier to trigger.
+
+Next investigation focus after this recurrence:
+
+1. Preserve pstore/kdump status immediately after every future reboot; July 7 had no pstore files.
+2. Fix known system noise so future evidence is cleaner:
+   - GitHub Actions runner duplicate-session/service failures.
+   - `x13-screen-off.timer.d/10-dephase.conf` parse warning.
+3. Consider testing PCIe/power-management mitigation such as `pcie_aspm=off` if sudden resets recur.
+4. Consider temporarily stopping Docker/GitHub runners to see whether idle/server uptime improves.
+5. If events continue on `6.8.0-90-generic`, escalate from "bad kernel 6.8.0-110" to broader ASUS
+   X13 Flow firmware/ACPI/PCIe/power-management or hardware instability investigation.
 
 ## Initial hypothesis checks
 
