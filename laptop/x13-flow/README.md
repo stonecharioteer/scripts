@@ -2,6 +2,8 @@
 
 Runtime helpers for using the ASUS ROG X13 Flow as a mostly headless/tent-mode Linux server.
 
+Part of the unified [`laptop/`](../README.md) tree alongside [`thinkpads/`](../thinkpads/README.md).
+
 Installation steps such as systemd units, sysctl files, LightDM configuration, lid handling, and GPU/display mitigation are managed by the `laptop-health` role in [`distributed-dotfiles`](https://github.com/stonecharioteer/distributed-dotfiles). This directory keeps the reusable scripts that should not live in the Qtile dotfiles repository.
 
 ## Scripts
