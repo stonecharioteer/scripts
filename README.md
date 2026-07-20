@@ -29,6 +29,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ### System Configuration
 - **[set-locale.sh](docs/set-locale.md)** - Configure en_US.UTF-8 locale with cleanup options for unused locales
 - **[laptop/](laptop/README.md)** - Laptop helpers for distributed-dotfiles (`thinkpads/` headless tools, `x13-flow/` screen/health helpers)
+- **[homelab/jellyfin](homelab/jellyfin/README.md)** - Dry-run Jellyfin music library organizer (`music_manage.py`)
 
 ## 🎯 Quick Start Examples
 
