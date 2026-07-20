@@ -2,13 +2,17 @@
 title: Laptop Hang RCA Notes
 host: rog-x13-flow
 initial_date: 2026-06-21
-last_updated: 2026-07-07
+last_updated: 2026-07-20
 os_stack: Linux Mint / Ubuntu
 problem_kernel: 6.8.0-110-generic
 current_mitigation_kernel: 6.8.0-90-generic
 current_status:
-  Running 6.8.0-90-generic after sudden unclean reboots on 2026-07-02 and 2026-07-07 with no
-  preserved final panic/oops cause; pstore did not capture the July 7 event.
+  Retiring Linux/server use on this ASUS X13 Flow after repeated unclean resets and non-rebooting
+  hard hangs across the tested Linux kernels, including another SSH-dead hard hang on 2026-07-20
+  while booted into 6.8.0-110-generic with pcie_aspm=off. No preserved panic/oops/OOM/thermal/NVMe
+  evidence was found; cumulative evidence points away from ordinary userspace load and toward an
+  ASUS/AMD firmware-kernel power-management or interrupt-handling wedge. The laptop will be treated
+  as a Windows gaming PC rather than a Linux host.
 key_events:
   - date: 2026-06-21
     summary:
@@ -32,6 +36,19 @@ key_events:
       Second sudden unclean reboot on 6.8.0-90-generic; previous boot stopped abruptly at 17:43:48,
       current boot began at 17:46:17; pstore empty; health snapshots showed no OOM, thermal, or disk
       fault, but Docker/GitHub runner churn was high near the final logs.
+  - date: 2026-07-15/16
+    summary:
+      Hard hang rather than auto-reboot; previous boot stopped logging at 2026-07-15 17:48:01 and
+      the machine was manually power-button restarted at 2026-07-16 21:33. Last health snapshots were
+      healthy, with no OOM/thermal/NVMe/panic evidence; strongest clue was persistent AMD PCIe
+      PME/runtime-PM noise plus irq/36-ELAN1201 in D state in the final snapshot.
+  - date: 2026-07-20
+    summary:
+      Another SSH-dead hard hang, this time on 6.8.0-110-generic with pcie_aspm=off. Previous boot
+      stopped logging abruptly at 10:12:06; hard reboot started at 11:50:32. Fish PATH changes were
+      validated and ruled out. Last pre-hang health snapshot was quiet, with no OOM/thermal/NVMe/panic
+      evidence. Decision: stop using this laptop as a Linux/server machine and repurpose it as a
+      Windows gaming PC.
 ---
 
 # Laptop Hang RCA Notes
@@ -302,6 +319,138 @@ Next investigation focus after this recurrence:
 4. Consider temporarily stopping Docker/GitHub runners to see whether idle/server uptime improves.
 5. If events continue on `6.8.0-90-generic`, escalate from "bad kernel 6.8.0-110" to broader ASUS
    X13 Flow firmware/ACPI/PCIe/power-management or hardware instability investigation.
+
+### 2026-07-15/16 hard hang requiring power button
+
+This incident differed from the July 2/7 sudden resets: the machine did not auto-reboot. It stopped
+responding to SSH and had to be recovered with the power button. The previous boot was:
+
+```text
+Previous boot: Sat 2026-07-11 14:14:24 IST → Wed 2026-07-15 17:48:01 IST
+Current boot:  Thu 2026-07-16 21:33:07 IST
+Current kernel: 6.8.0-90-generic
+```
+
+The final previous-boot journal entries were normal periodic jobs. There was no clean shutdown path,
+and the next boot showed an unclean journal replacement:
+
+```text
+Jul 15 17:47:53 systemd: Finished hang-health-snapshot.service
+Jul 15 17:48:01 CRON: battery-cycles collect ... session closed
+Jul 16 21:33:07 systemd-journald: system.journal corrupted or uncleanly shut down, renaming and replacing.
+```
+
+Searches of the previous boot did not find a preserved kernel panic, oops, lockup report, RCU stall,
+hung-task report, OOM kill, thermal critical event, NVMe I/O error, or pstore record. `archive-pstore`
+ran successfully after boot, but `/sys/fs/pstore` and `/var/log/pstore-archive` had no crash files.
+Panic-on-oops/softlockup/hung-task sysctls were still enabled, which makes an unlogged firmware/driver
+hang more likely than a clean kernel panic path.
+
+The health snapshots immediately before logging stopped were normal:
+
+```text
+snapshot: 2026-07-15T17:47:53+05:30
+uptime: 4 days, 3:35
+load average: 0.22, 0.23, 0.28
+memory: ~26 GiB available, swap 0B used
+root disk: 52% used
+AC online: 1
+battery: 59%, status=Not charging, threshold=60, power_now=0
+CPU Tctl: ~42.8°C
+AMD GPU edge: ~44°C
+NVMe: ~34.9°C
+recent kernel warnings/errors in health snapshot: none
+```
+
+The strongest clue in the final snapshots was not resource pressure but low-level device/PM activity:
+
+```text
+last-hour kernel warnings: repeated pcieport 0000:00:08.1: PME: Spurious native interrupt!
+earlier: workqueue: pm_runtime_work hogged CPU for >10000us 4096 times
+final top CPU sample: kworker/*-pm and irq/36-ELAN1201 present; irq/36-ELAN1201 was in D state at 17:46:48
+current boot IRQ mapping: IRQ 36 = amd_gpio 8 ELAN1201:00; IRQ 35 = amd_gpio 115 ELAN9008:00
+current boot has i2c_hid_acpi bound to i2c-ELAN1201:00 and i2c-ELAN9008:00
+```
+
+Interpretation: the hang cause is still not proven, but this incident now points more strongly to an
+ASUS/AMD firmware-kernel device power-management or interrupt-handling wedge than to Docker/GitHub
+runner load, OOM, thermals, storage, or the old `6.8.0-110-generic` VM/slab oops. The recurring AMD
+PCIe PME/runtime-PM warnings remain the broad platform-level suspect. The new per-incident clue is
+the ELAN I2C HID path (`ELAN1201:00` via `amd_gpio`) appearing in uninterruptible sleep in the final
+health sample; that may be a symptom of the same PM/interrupt wedge rather than the root device.
+
+Recommended next mitigation if this recurs or if uptime matters more than power savings:
+
+1. Test a PCIe/runtime-PM mitigation boot such as `pcie_aspm=off`.
+2. Consider disabling runtime PM for the noisy AMD internal PCIe bridge / related devices if a
+   narrower sysfs mitigation is preferred.
+3. If the laptop is headless/tent-mode only, consider unbinding or disabling unused ELAN I2C HID
+   devices as a controlled test, especially if `irq/36-ELAN1201` or `i2c_hid_acpi` appears in D state
+   again before a hang.
+4. Keep pstore/kdump capture enabled; no crash evidence was available for this event.
+5. Continue treating Docker/GitHub runners as workload/noise, not the leading root cause for this
+   event, because the final load/memory/thermal data were quiet.
+
+### 2026-07-20 repeat SSH-dead hard hang and Linux retirement decision
+
+Another non-rebooting hard hang occurred while the machine was still being used as a Linux/server
+host. SSH refused or stopped accepting connections from the client side, and the machine required a
+hard reboot. The observed boot history was:
+
+```text
+Previous boot: Fri 2026-07-17 16:05:02 IST → Mon 2026-07-20 10:12:06 IST
+Hard reboot / current boot: Mon 2026-07-20 11:50:32 IST
+Kernel before hang: 6.8.0-110-generic with pcie_aspm=off
+Kernel after reboot:  6.8.0-90-generic
+```
+
+`last -x` showed the active SSH sessions from `192.168.100.234` ending with `crash`, not a clean
+logout. The previous boot journal ended abruptly at `10:12:06`; the next boot began at `11:50:32`
+and journald reported the expected unclean-shutdown journal replacement. There was no orderly
+shutdown, reboot target, or sshd-side refusal sequence preserved. The SSH service was healthy after
+reboot and accepted the same public key at `11:51:02`, so the client-side "connection refused"
+behavior is best interpreted as the host/network/sshd no longer servicing connections during the
+wedge, not as an SSH configuration failure.
+
+The last pre-hang health snapshot was quiet:
+
+```text
+snapshot: 2026-07-20T10:12:06+05:30
+uptime: 2 days, 18:08
+load average: 0.17, 0.16, 0.11
+memory: ~27 GiB available, swap 0B used
+root disk: 53% used, ~175 GiB free
+AC online: 1
+battery: 59%, status=Not charging, threshold=60, power_now=0
+CPU Tctl: ~51.9°C
+AMD GPU edge: ~52°C
+NVMe: ~35.9°C
+recent kernel warnings/errors in health snapshot: none
+```
+
+Searches around the previous boot did not find a preserved OOM, thermal critical event, NVMe I/O
+error, panic/oops, lockup, watchdog, or pstore crash record. This matches the July 15/16 hard-hang
+pattern more than a normal userspace failure: the machine can stop logging and stop serving SSH while
+resource telemetry still looks healthy shortly before the event.
+
+The Fish PATH edit made shortly before the report was checked separately and ruled out as the cause:
+
+```text
+fish -n ~/.config/fish/config.fish          # passed
+timeout 8 fish -lc 'echo fish-ok ...'       # passed; scripts path present
+timeout 10 fish -i -c 'echo interactive...' # passed
+```
+
+RCA conclusion after this recurrence: the exact device/driver fault is still not proven, but the
+repeated pattern is no longer worth treating as a simple script, SSH, Docker, battery, thermal, disk,
+or shell-configuration issue. The latest event also happened despite `pcie_aspm=off`, so that broad
+PCIe ASPM mitigation was insufficient. Across incidents, the strongest remaining explanation is ASUS
+X13 Flow Linux platform instability: an ASUS/AMD firmware-kernel power-management, PCIe/runtime-PM,
+I2C HID, Wi-Fi/ACPI, or interrupt-handling wedge that can leave the system alive enough to preserve
+no crash record but dead enough to require a hard reboot.
+
+Operational decision: stop investing in this laptop as a Linux/headless/server host. Repurpose it as
+a Windows gaming PC and move Linux/server workloads elsewhere.
 
 ## Initial hypothesis checks
 
@@ -828,3 +977,53 @@ pcie_aspm=off
 
 7. Consider a newer HWE/OEM kernel if GPU/ACPI hangs continue or if older-kernel rollback is not
    sufficient.
+
+## Final Linux issue summary
+
+The laptop was not reliable as a Linux workstation or headless/server host. Across the investigation,
+the recurring issues were:
+
+- Full-system hangs where both the local UI/display path and SSH became unavailable, requiring a hard
+  reboot or power-button recovery.
+- A clear `6.8.0-110-generic` kernel oops incident with repeated VM/slab/fork-exec related faults
+  (`kmem_cache_alloc` / `anon_vma` style traces), leaving the machine SSH-dead.
+- Sudden unclean reboots on the rollback `6.8.0-90-generic` kernel with no clean shutdown path and no
+  preserved final panic/oops cause.
+- Later non-rebooting hard hangs on Linux, including the July 15/16 and July 20 events, where health
+  snapshots showed normal memory, swap, disk, battery, and thermals shortly before logging stopped.
+- Repeated journal corruption/replacement after recovery, consistent with forced or unclean shutdowns.
+- Persistent AMD/ASUS platform noise: PCIe PME spurious interrupts, runtime-PM workqueue warnings,
+  and suspected low-level power-management or interrupt-handling wedges.
+- ELAN I2C HID / `amd_gpio` involvement in the final July 15/16 evidence (`irq/36-ELAN1201` in D
+  state), likely another symptom of the platform/interrupt wedge.
+- Headless/tent-mode display management problems: backlight control alone was insufficient, requiring
+  framebuffer blanking and a periodic keep-off timer.
+- Hybrid graphics/NVIDIA integration remained brittle enough that the dGPU was disabled/avoided during
+  troubleshooting, though the later failures did not point primarily to NVIDIA.
+- Diagnostic capture was poor for the worst failures: pstore did not preserve useful crash records,
+  and the system often stopped logging before the actual root fault became visible.
+- Workload noise from Docker, GitHub Actions runners, cron jobs, and health timers made logs busier,
+  but the strongest evidence did not support these as the primary cause.
+- A broad PCIe ASPM mitigation (`pcie_aspm=off`) was insufficient; the July 20 hang occurred while it
+  was present on the kernel command line.
+
+### Temperature distribution across captured health data
+
+The raw health log snapshot used for this table is committed as:
+
+```text
+laptop/x13-flow/provenance/hang-health-2026-07-20.log.zst
+raw snapshot sha256: 0941eba116c446bc1a1238b4eaacddf6ed570ad1b857b29bc8385b08fdc7f907
+zstd artifact sha256: 4761f761dcd8940fa54e40734bee75b94c0248459b5ad1137fb68e37c51a2928
+```
+
+| Sensor         | Samples | Min °C | P25 °C | P50 °C | P75 °C | P90 °C | P95 °C | P99 °C | Max °C |
+| -------------- | ------: | -----: | -----: | -----: | -----: | -----: | -----: | -----: | -----: |
+| CPU Tctl       |   36596 |   33.4 |   40.1 |   41.6 |   43.8 |   51.9 |   53.1 |   67.2 |   93.9 |
+| thermal_zone0  |   36596 |   33.0 |   39.0 |   41.0 |   43.0 |   51.0 |   52.0 |   67.0 |   94.0 |
+| AMD GPU edge   |   36596 |   32.0 |   40.0 |   41.0 |   43.0 |   51.0 |   52.0 |   56.0 |   77.0 |
+| NVMe Composite |   36596 |   28.9 |   31.9 |   31.9 |   32.9 |   36.9 |   36.9 |   38.9 |   51.9 |
+| iwlwifi        |   36596 |   34.0 |   38.0 |   39.0 |   42.0 |   50.0 |   51.0 |   54.0 |   66.0 |
+
+Final decision: Linux on this ASUS X13 Flow is not worth further time for this use case. Treat the
+machine as a Windows gaming PC and move Linux/server workloads to more stable hardware.

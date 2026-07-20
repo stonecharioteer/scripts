@@ -34,3 +34,4 @@ repos:
       - id: prettier
         name: prettier (markdown)
         types_or: [markdown]
+        args: [--config, .prettierrc.yaml]
