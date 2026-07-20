@@ -1,0 +1,7 @@
+.git/
+.venv/
+__pycache__/
+.ai-usage-cache/
+node_modules/
+*.min.js
+*.min.css
