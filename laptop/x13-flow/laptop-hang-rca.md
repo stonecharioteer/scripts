@@ -977,3 +977,35 @@ pcie_aspm=off
 
 7. Consider a newer HWE/OEM kernel if GPU/ACPI hangs continue or if older-kernel rollback is not
    sufficient.
+
+## Final Linux issue summary
+
+The laptop was not reliable as a Linux workstation or headless/server host. Across the investigation,
+the recurring issues were:
+
+- Full-system hangs where both the local UI/display path and SSH became unavailable, requiring a hard
+  reboot or power-button recovery.
+- A clear `6.8.0-110-generic` kernel oops incident with repeated VM/slab/fork-exec related faults
+  (`kmem_cache_alloc` / `anon_vma` style traces), leaving the machine SSH-dead.
+- Sudden unclean reboots on the rollback `6.8.0-90-generic` kernel with no clean shutdown path and no
+  preserved final panic/oops cause.
+- Later non-rebooting hard hangs on Linux, including the July 15/16 and July 20 events, where health
+  snapshots showed normal memory, swap, disk, battery, and thermals shortly before logging stopped.
+- Repeated journal corruption/replacement after recovery, consistent with forced or unclean shutdowns.
+- Persistent AMD/ASUS platform noise: PCIe PME spurious interrupts, runtime-PM workqueue warnings,
+  and suspected low-level power-management or interrupt-handling wedges.
+- ELAN I2C HID / `amd_gpio` involvement in the final July 15/16 evidence (`irq/36-ELAN1201` in D
+  state), likely another symptom of the platform/interrupt wedge.
+- Headless/tent-mode display management problems: backlight control alone was insufficient, requiring
+  framebuffer blanking and a periodic keep-off timer.
+- Hybrid graphics/NVIDIA integration remained brittle enough that the dGPU was disabled/avoided during
+  troubleshooting, though the later failures did not point primarily to NVIDIA.
+- Diagnostic capture was poor for the worst failures: pstore did not preserve useful crash records,
+  and the system often stopped logging before the actual root fault became visible.
+- Workload noise from Docker, GitHub Actions runners, cron jobs, and health timers made logs busier,
+  but the strongest evidence did not support these as the primary cause.
+- A broad PCIe ASPM mitigation (`pcie_aspm=off`) was insufficient; the July 20 hang occurred while it
+  was present on the kernel command line.
+
+Final decision: Linux on this ASUS X13 Flow is not worth further time for this use case. Treat the
+machine as a Windows gaming PC and move Linux/server workloads to more stable hardware.
