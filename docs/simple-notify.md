@@ -1,5 +1,9 @@
 # Simple Notify
 
+## Status
+
+Legacy wrapper kept for existing Simplepush usage. New notifications should use [`ntfy.sh`](ntfy.md).
+
 ## Purpose
 
 I wanted a tiny command-line wrapper for Simplepush so shell scripts and one-off terminal commands can send phone notifications with a single command.
