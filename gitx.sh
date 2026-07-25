@@ -57,10 +57,12 @@ ENVIRONMENT:
     GITX_REMOTE             Default remote name
     GITX_DEFAULT_BRANCH     Default branch name, skipping detection
     GITX_PROTECTED_BRANCHES Extra branches cleanup must never delete
+    GITX_STATUS_COMPARE     Default --vs refs for status
     NO_COLOR                Disable colored output
 
 EXAMPLES:
     $(basename "$0") status
+    $(basename "$0") status --vs main           # also compare against a deploy branch
     $(basename "$0") changed                    # what this branch touches vs main
     $(basename "$0") changed feat/other-work
     $(basename "$0") branch feat add git tools  # -> feat/add-git-tools

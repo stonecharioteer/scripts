@@ -59,6 +59,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 
 # Git workflow helpers behind one dispatcher
 ./gitx.sh status  # Branch, upstream, default-branch, worktree, stashes
+./gitx.sh status --vs main  # Also compare against a deploy branch that is not the default
 ./gitx.sh changed  # Files this branch changed vs the default branch, with +/- counts
 ./gitx.sh changed -i  # Pick a branch with fzf, browse its files with a diff preview
 ./gitx.sh branch feat add git tools  # Create feat/add-git-tools off an updated main

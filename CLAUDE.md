@@ -88,8 +88,15 @@ power-monitor's layout) and reworked `check-pr.py`.
   `git cherry` against the default branch. `git branch --merged` cannot see these
 - **Checkout-free sync**: `git fetch origin main:main` fast-forwards the default branch
   from a feature branch; a diverged local branch is reported, never forced
-- **Default branch detection**: remote `HEAD` symref first, then `main`/`master`/`trunk`/
-  `develop` on the remote, then locally. No network in read-only commands
+- **Default branch detection**: remote `HEAD` symref first. When it is missing, guessing
+  from a name list is only safe if exactly one candidate exists — a repo whose default is
+  `development` but which also has `main` (merrilin) would otherwise resolve to `main`. On
+  ambiguity, ask via `git ls-remote --symref` and cache the answer into
+  `refs/remotes/<remote>/HEAD`, so the network cost happens at most once. An unreachable
+  remote falls back to a guess and says so
+- **Deploy branch vs default branch**: `status --vs REF` (repeatable, or
+  `GITX_STATUS_COMPARE`) adds Compare rows, for repos like merrilin where `development` is
+  default and `main` is what ships
 - **fzf vs gum**: fzf for pickers with previews, gum for prompts/spinners/multi-select.
   Pickers gate on a usable `/dev/tty`, not `-t 1`, so `-i --name-only | xargs` still works
 - **Dry run default**: `cleanup` requires `--apply`; `-d` for merged, `-D` only for

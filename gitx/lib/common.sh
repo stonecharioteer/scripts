@@ -97,12 +97,36 @@ gitx_remote() {
     git remote | head -n 1
 }
 
-# Resolve the default branch name without hitting the network:
-# GITX_DEFAULT_BRANCH, then the remote's HEAD symref, then common names as they
-# exist on the remote, then as local branches. Returns 1 when nothing matches.
+# Names to try when nothing authoritative is available, most common first. Only
+# ever a fallback: guessing from this list is what makes a repo whose default is
+# 'development' but which also has a 'main' look like a 'main' repo.
+GITX_DEFAULT_BRANCH_CANDIDATES=(main master development develop trunk mainline)
+
+# Ask the remote which branch its HEAD points at, then cache the answer in
+# refs/remotes/<remote>/HEAD so later runs resolve it locally.
+gitx_remote_head() {
+    local remote="$1"
+    local ref branch
+
+    ref=$(GIT_TERMINAL_PROMPT=0 git ls-remote --symref "$remote" HEAD 2>/dev/null \
+        | awk '$1 == "ref:" { print $2; exit }')
+    branch="${ref#refs/heads/}"
+    [[ -n "$branch" ]] || return 1
+
+    if git show-ref --verify --quiet "refs/remotes/$remote/$branch"; then
+        git symbolic-ref "refs/remotes/$remote/HEAD" "refs/remotes/$remote/$branch" 2>/dev/null || true
+    fi
+
+    printf '%s' "$branch"
+}
+
+# Resolve the default branch: GITX_DEFAULT_BRANCH, then the remote's cached HEAD
+# symref, then the remote itself when a local guess would be ambiguous, then
+# local branches. Returns 1 when nothing matches.
 gitx_default_branch() {
     local remote="${1:-}"
-    local ref candidate
+    local ref candidate branch
+    local -a matches=()
 
     if [[ -n "${GITX_DEFAULT_BRANCH:-}" ]]; then
         printf '%s' "$GITX_DEFAULT_BRANCH"
@@ -119,15 +143,33 @@ gitx_default_branch() {
     fi
 
     if [[ -n "$remote" ]]; then
-        for candidate in main master trunk develop; do
+        for candidate in "${GITX_DEFAULT_BRANCH_CANDIDATES[@]}"; do
             if git show-ref --verify --quiet "refs/remotes/$remote/$candidate"; then
-                printf '%s' "$candidate"
-                return 0
+                matches+=("$candidate")
             fi
         done
+
+        # Exactly one plausible name: trust it and stay offline. More than one
+        # (say both 'main' and 'development') makes any guess a coin flip, so
+        # ask the remote rather than pick wrong.
+        if [[ ${#matches[@]} -eq 1 ]]; then
+            printf '%s' "${matches[0]}"
+            return 0
+        fi
+
+        if branch=$(gitx_remote_head "$remote"); then
+            printf '%s' "$branch"
+            return 0
+        fi
+
+        if [[ ${#matches[@]} -gt 1 ]]; then
+            warn "could not ask '$remote' which branch is default; guessing '${matches[0]}'. Set GITX_DEFAULT_BRANCH or pass --default-branch"
+            printf '%s' "${matches[0]}"
+            return 0
+        fi
     fi
 
-    for candidate in main master trunk develop; do
+    for candidate in "${GITX_DEFAULT_BRANCH_CANDIDATES[@]}"; do
         if git show-ref --verify --quiet "refs/heads/$candidate"; then
             printf '%s' "$candidate"
             return 0

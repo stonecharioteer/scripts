@@ -14,18 +14,30 @@ relative to the default branch, working tree state, stashes, and last commit.
 Unlike 'git status', this answers "where am I relative to everything else"
 in a handful of lines.
 
+Use --vs to also compare against another branch, which is what you want when
+the default branch is not the branch you deploy from. Repeat it for more, or
+set GITX_STATUS_COMPARE once per repo.
+
 OPTIONS:
     -h, --help          Show this help message
     -f, --fetch         Fetch from the remote first so counts are current
+        --vs REF        Also report ahead/behind against REF (repeatable)
+
+ENVIRONMENT:
+    GITX_STATUS_COMPARE Default --vs refs, comma or space separated
 
 EXAMPLES:
     gitx status
     gitx status --fetch
+    gitx status --vs main               # e.g. development is default, main deploys
+    gitx status --vs main --vs staging
+    GITX_STATUS_COMPARE=main gitx status
 EOF
 }
 
 cmd_status() {
     local do_fetch=false
+    local -a compare_refs=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -37,11 +49,20 @@ cmd_status() {
                 do_fetch=true
                 shift
                 ;;
+            --vs | --against)
+                [[ $# -ge 2 ]] || error "--vs requires a ref"
+                compare_refs+=("$2")
+                shift 2
+                ;;
             *)
                 error "unknown option for 'status': $1"
                 ;;
         esac
     done
+
+    if [[ ${#compare_refs[@]} -eq 0 && -n "${GITX_STATUS_COMPARE:-}" ]]; then
+        read -r -a compare_refs <<< "${GITX_STATUS_COMPARE//,/ }"
+    fi
 
     require_repo
 
@@ -101,6 +122,24 @@ cmd_status() {
     else
         field "Default" "${DIM}unknown${NC}"
     fi
+
+    # Extra comparisons, for repos where the deploy branch is not the default
+    local compare_ref resolved counts ahead behind detail
+    for compare_ref in "${compare_refs[@]+"${compare_refs[@]}"}"; do
+        resolved="$(gitx_tracking_ref "$compare_ref" "$remote")"
+        if ! git rev-parse --verify --quiet "$resolved^{commit}" > /dev/null; then
+            field "Compare" "${YELLOW}$compare_ref not found${NC}"
+            continue
+        fi
+        counts="$(gitx_ahead_behind "$resolved" HEAD)"
+        ahead="${counts% *}"
+        behind="${counts#* }"
+        detail="ahead $ahead, behind $behind vs $resolved"
+        if [[ "$ahead" == "0" ]]; then
+            detail="$detail ${DIM}(fully contained)${NC}"
+        fi
+        field "Compare" "$detail"
+    done
 
     # Working tree
     local counts staged unstaged untracked

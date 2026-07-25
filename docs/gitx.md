@@ -28,8 +28,11 @@ colors, and interactive pickers.
   branch after you branched off
 - **Squash-merge detection** - `cleanup` finds branches GitHub squashed, which
   `git branch --merged` misses entirely
-- **Default branch detection** - reads the remote's `HEAD` symref, with fallbacks, so it
-  works on `main`, `master`, `development`, or `trunk` without configuration
+- **Default branch detection** - reads the remote's `HEAD` symref, and asks the remote
+  directly when a local guess would be ambiguous, so a repo whose default is `development`
+  but which also has a `main` is not mistaken for a `main` repo
+- **Deploy-branch awareness** - `status --vs main` reports where you sit relative to any
+  other branch, for repos where the default branch is not the one you ship from
 - **Checkout-free updates** - `sync` fast-forwards the default branch while you stay on
   your feature branch
 - **fzf and gum throughout** - branch and file pickers with live diff previews, gum
@@ -85,6 +88,25 @@ Worktree    0 staged, 1 unstaged, 9 untracked
 Stashes     none
 Last commit 2b3b0d6 Merge pull request #29 (5 days ago)
 ```
+
+**Comparing against another branch.** When the branch you deploy from is not the default
+branch, `--vs` adds a `Compare` row. Repeat it for more than one, or set
+`GITX_STATUS_COMPARE` once per repo:
+
+```bash
+gitx status --vs main                    # development is default, main deploys
+gitx status --vs main --vs staging
+GITX_STATUS_COMPARE=main gitx status
+```
+
+```
+Default     development (tracking origin/development)
+Position    ahead 2, behind 0 vs origin/development
+Compare     ahead 20, behind 21 vs origin/main
+```
+
+A ref that does not exist is reported in place rather than being fatal, so a stale entry in
+`GITX_STATUS_COMPARE` cannot break the command.
 
 ### changed
 
@@ -229,6 +251,7 @@ gitx gi
 | `GITX_REMOTE`             | Default remote name                        |
 | `GITX_DEFAULT_BRANCH`     | Default branch name, skipping detection    |
 | `GITX_PROTECTED_BRANCHES` | Extra branches `cleanup` must never delete |
+| `GITX_STATUS_COMPARE`     | Default `--vs` refs for `status`           |
 | `NO_COLOR`                | Disable colored output                     |
 
 ## Command Aliases
