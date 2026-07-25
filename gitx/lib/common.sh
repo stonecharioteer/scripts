@@ -297,14 +297,18 @@ gitx_header() {
 
 # Run a command behind a gum spinner, falling back to a plain progress line.
 # Usage: gitx_spin "Fetching origin..." git fetch --prune origin
+#
+# The command's stdout is preserved in both paths, so this is safe to wrap around
+# something whose output is captured. Progress text goes to stderr for the same
+# reason: it is not part of the command's output.
 gitx_spin() {
     local title="$1"
     shift
 
     if gitx_has_gum && gitx_interactive; then
-        gum spin --spinner dot --title "$title" --show-error -- "$@"
+        gum spin --spinner dot --title "$title" --show-output -- "$@"
     else
-        info "$title"
+        printf '%s\n' "$title" >&2
         "$@"
     fi
 }

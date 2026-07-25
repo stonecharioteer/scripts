@@ -20,7 +20,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, checks sorted worst-first, runner/machine info, previous-run verdict and timing trend (regressed/fixed/slower), reviews, and bot activity (CodeRabbit, etc.)
 - **[env-diff.sh](docs/env-diff.md)** - Compare `.env` files in a gum table while redacting token-like values
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
-- **[gitx.sh](docs/gitx.md)** - Git workflow dispatcher: branch status, merge-base changed files with +/- counts, conventional branch creation, checkout-free default-branch sync, squash-merge-aware branch cleanup, and wrappers for check-pr and gi-select
+- **[gitx.sh](docs/gitx.md)** - Git workflow dispatcher: branch status, merge-base changed files with +/- counts, conventional branch creation, checkout-free default-branch sync, squash-merge-aware branch cleanup, a PR listing with author and destination branch, and wrappers for check-pr and gi-select
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
 
 ### Notifications
@@ -66,7 +66,9 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ./gitx.sh sync --rebase  # Fetch, fast-forward main, rebase the current branch
 ./gitx.sh cleanup  # List merged and squash-merged branches (dry run)
 ./gitx.sh cleanup --apply  # Delete them after a gum confirmation
-./gitx.sh pr --concise  # Wraps check-pr.sh
+./gitx.sh pr check --concise  # Wraps check-pr.sh
+./gitx.sh pr list  # Open PRs with author and destination branch, off-target ones flagged
+./gitx.sh pr list --base main --mine  # Filter by destination branch and author
 
 # Collect AI coding-agent usage into JSON/CSV stats, ai-usage.html, and a shareable infographic
 ./ai-usage.sh
@@ -111,7 +113,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | check-pr           | `uv`, `gh`, `git`                                                                                              |
 | env-diff           | `gum`, `awk`, `sort`                                                                                           |
 | gi-select          | `gum`, gitignore repository                                                                                    |
-| gitx               | `git`; `fzf` and `gum` for pickers and prompts; `uv` + `gh` for `gitx pr`                                      |
+| gitx               | `git`; `fzf` and `gum` for pickers and prompts; `uv` + `gh` for `pr check`; `gh` + `jq` for `pr list`          |
 | highlight-manager  | `duckdb`, `gum`, `jq`, `python3`                                                                               |
 | ntfy               | `curl`                                                                                                         |
 | simple-notify      | `curl`                                                                                                         |

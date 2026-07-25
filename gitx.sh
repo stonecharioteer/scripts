@@ -41,7 +41,8 @@ COMMANDS:
     branch, new         Create a TYPE/description branch off an up-to-date default branch
     sync, update        Fetch, fast-forward the default branch, report divergence
     cleanup, tidy       Delete local branches already merged or squash-merged
-    pr                  PR merge status, checks, reviews, bots (wraps check-pr.sh)
+    pr check            PR merge status, checks, reviews, bots (wraps check-pr.sh)
+    pr list             Open PRs with author and destination branch
     gitignore, gi       Append GitHub gitignore templates (wraps gi-select.sh)
     help [COMMAND]      Show help for a command
 
@@ -68,7 +69,8 @@ EXAMPLES:
     $(basename "$0") branch feat add git tools  # -> feat/add-git-tools
     $(basename "$0") sync --rebase
     $(basename "$0") cleanup --apply
-    $(basename "$0") pr --concise
+    $(basename "$0") pr check --concise
+    $(basename "$0") pr list --mine
     $(basename "$0") -C ~/code/other-repo status
 EOF
 }
@@ -94,7 +96,11 @@ cmd_help() {
             show_cleanup_help
             ;;
         pr)
-            show_pr_help
+            case "${2:-}" in
+                check) show_pr_check_help ;;
+                list | ls) show_pr_list_help ;;
+                *) show_pr_help ;;
+            esac
             ;;
         gitignore | gi)
             show_gitignore_help

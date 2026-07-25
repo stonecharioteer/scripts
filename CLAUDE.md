@@ -77,8 +77,8 @@ Complete power monitoring system for house/room-level status tracking:
 Wrapped the git tooling behind `gitx.sh` (dispatcher + `gitx/lib/` modules, following
 power-monitor's layout) and reworked `check-pr.py`.
 
-**gitx commands**: `status`, `changed`, `branch`, `sync`, `cleanup`, plus `pr` and
-`gitignore` delegating to `check-pr.sh` and `gi-select.sh`.
+**gitx commands**: `status`, `changed`, `branch`, `sync`, `cleanup`, `pr check`, `pr list`,
+and `gitignore`. `pr check` and `gitignore` delegate to `check-pr.sh` and `gi-select.sh`.
 
 **Key decisions**:
 
@@ -96,7 +96,12 @@ power-monitor's layout) and reworked `check-pr.py`.
   remote falls back to a guess and says so
 - **Deploy branch vs default branch**: `status --vs REF` (repeatable, or
   `GITX_STATUS_COMPARE`) adds Compare rows, for repos like merrilin where `development` is
-  default and `main` is what ships
+  default and `main` is what ships. `pr list` flags PRs whose destination is not the default
+  branch for the same reason
+- **`gitx_spin` and captured output**: the fallback path printed its progress line to
+  stdout, which corrupted `$(...)` captures (`pr list` fed it to jq). Progress now goes to
+  stderr, and the gum path uses `--show-output` so the wrapped command's stdout passes
+  through. Verified under a pty that the spinner itself never leaks into stdout
 - **fzf vs gum**: fzf for pickers with previews, gum for prompts/spinners/multi-select.
   Pickers gate on a usable `/dev/tty`, not `-t 1`, so `-i --name-only | xargs` still works
 - **Dry run default**: `cleanup` requires `--apply`; `-d` for merged, `-D` only for

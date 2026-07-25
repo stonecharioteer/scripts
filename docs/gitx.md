@@ -48,7 +48,8 @@ colors, and interactive pickers.
 | `git`         | everything                                          |
 | `fzf`         | branch and changed-file pickers (`changed -i`)      |
 | `gum`         | prompts, spinners, `cleanup` selection, `gitignore` |
-| `uv` and `gh` | `gitx pr` (delegates to `check-pr.sh`)              |
+| `uv` and `gh` | `gitx pr check` (delegates to `check-pr.sh`)        |
+| `gh` and `jq` | `gitx pr list`                                      |
 
 `fzf` and `gum` are optional: without them the pickers degrade to non-interactive output
 and prompts fall back to a plain `read`.
@@ -63,7 +64,7 @@ gitx/lib/changed.sh     # gitx changed
 gitx/lib/branch.sh      # gitx branch
 gitx/lib/sync.sh        # gitx sync
 gitx/lib/cleanup.sh     # gitx cleanup
-gitx/lib/pr.sh          # gitx pr      -> check-pr.sh
+gitx/lib/pr.sh          # gitx pr check -> check-pr.sh, and gitx pr list
 gitx/lib/gitignore.sh   # gitx gitignore -> gi-select.sh
 ```
 
@@ -207,21 +208,52 @@ only squash-merged ones need `-D`, since git cannot see the equivalence itself.
 the merge base, then `git cherry` is asked whether an equivalent patch already exists on
 the default branch. The probe commit is never referenced, so it is garbage collected.
 
-### pr
+### pr check
 
-PR merge status, checks, reviews, and bot activity. Delegates to `check-pr.sh`, so every
-option it accepts works here.
+PR merge status, checks, reviews, and bot activity for the current branch. Delegates to
+`check-pr.sh`, so every option it accepts works here. A bare `gitx pr` runs `check`.
 
 ```bash
-gitx pr
-gitx pr --concise
-gitx pr -w                 # watch mode
-gitx pr -w -i 10           # watch, refreshing every 10 seconds
+gitx pr check
+gitx pr check --concise
+gitx pr check -w                 # watch mode
+gitx pr check -w -i 10           # watch, refreshing every 10 seconds
 ```
 
 In watch mode, `r` refreshes immediately and `q` quits. Manual refreshes have a
 three-second cooldown, and keys pressed while a refresh is in flight are discarded, so
 holding `r` down cannot turn into a burst of API calls.
+
+### pr list
+
+Open PRs with the two things `gh pr list` leaves out of easy reach: **who opened each one**
+and **which branch it targets**. A destination that is not the default branch is
+highlighted, and counted in the footer — that is usually the interesting case, either a
+release promotion or a PR aimed at the wrong branch.
+
+```bash
+gitx pr list
+gitx pr list --mine
+gitx pr list --base main            # what is queued for the deploy branch
+gitx pr list -H                     # also show the source branch
+gitx pr list --state merged -L 10
+gitx pr list -i | xargs -n1 gh pr view
+```
+
+```
+  1007  stonecharioteer  main         draft  chore: promote development to …  3m
+   999  Bukkaraya        development  draft  Add admin-only chat model pick…  4d
+   960  stonecharioteer  development         fix: fail fast on non-dev data…  1w
+
+  12 pull requests, 1 not targeting development
+```
+
+The flag column shows `draft`, `approved`, or `changes` (changes requested), so a listing
+doubles as a review queue. Titles are truncated to the terminal width; everything else is
+sized to its content. `-i` picks PRs with fzf, previewing `gh pr view`, and prints the
+selected numbers to stdout so they pipe into `gh`.
+
+This is one `gh pr list` call plus `jq`, so it is a single round trip.
 
 ### gitignore
 
@@ -263,7 +295,11 @@ gitx gi
 | `branch`    | `new`    |
 | `sync`      | `update` |
 | `cleanup`   | `tidy`   |
+| `pr list`   | `pr ls`  |
 | `gitignore` | `gi`     |
+
+A bare `gitx pr` runs `pr check`, and `gitx pr --concise` still works, so the older
+single-level form keeps functioning.
 
 ## Suggested Alias
 
