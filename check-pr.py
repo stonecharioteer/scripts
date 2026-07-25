@@ -996,8 +996,22 @@ def watch(args: argparse.Namespace) -> int:
     note_until = 0.0
 
     body: Text | None = None
+    body_signature: tuple | None = None
+    painted = ""
+    revision = 0
 
-    with key_reader() as key_fd, Live(console=console, refresh_per_second=4, transient=False) as live:
+    def paint(frame: Text) -> None:
+        """Repaint only when the frame actually differs from what is on screen."""
+        nonlocal painted
+        if frame.plain == painted:
+            return
+        live.update(frame, refresh=True)
+        painted = frame.plain
+
+    # auto_refresh=False: with it on, Rich repaints the whole region several
+    # times a second whether or not anything changed. Every repaint here is
+    # deliberate instead.
+    with key_reader() as key_fd, Live(console=console, auto_refresh=False, transient=False) as live:
         try:
             while True:
                 now = time.monotonic()
@@ -1005,7 +1019,7 @@ def watch(args: argparse.Namespace) -> int:
                     # Say so before blocking on the network, so a manual refresh
                     # gives immediate feedback instead of a frozen countdown
                     if body is not None:
-                        live.update(with_watch_footer(
+                        paint(with_watch_footer(
                             body, last_updated, next_refresh, warning,
                             refreshing=True, keys=key_fd is not None,
                         ))
@@ -1039,23 +1053,30 @@ def watch(args: argparse.Namespace) -> int:
                     last_fetch_at = time.monotonic()
                     next_refresh = last_fetch_at + args.interval
                     note = ""
+                    revision += 1
                     if drain_input(key_fd):
                         break
 
                 if note and time.monotonic() >= note_until:
                     note = ""
 
-                # Re-render every tick so a resize is picked up without refetching.
+                # Rebuild the body only when something it depends on changed. The
+                # countdown ticks every second, but re-rendering every table to
+                # advance a number is wasted work.
                 # Reserve two lines for the footer plus one for the prompt.
                 width, height = console.size
-                body = watch_body(
-                    state,
-                    message,
-                    concise=args.concise,
-                    width=width,
-                    height=max(1, height - 3),
-                )
-                live.update(with_watch_footer(
+                signature = (revision, width, height, args.concise, message)
+                if body is None or signature != body_signature:
+                    body = watch_body(
+                        state,
+                        message,
+                        concise=args.concise,
+                        width=width,
+                        height=max(1, height - 3),
+                    )
+                    body_signature = signature
+
+                paint(with_watch_footer(
                     body, last_updated, next_refresh, warning,
                     keys=key_fd is not None, note=note,
                 ))

@@ -117,6 +117,12 @@ power-monitor's layout) and reworked `check-pr.py`.
   excluded
 - **Review bug**: a COMMENTED review overwrote that user's earlier APPROVED; only
   APPROVED/CHANGES_REQUESTED/DISMISSED are decisive now
+- **Idle repaints**: `Live(refresh_per_second=4)` with auto-refresh repainted the whole
+  region 4x/second even when nothing changed, which is what made a refresh look like a full
+  redraw. Now `auto_refresh=False`, the body is rebuilt only when its inputs change
+  (revision/size/concise), and a frame is painted only when it differs from what is on
+  screen: 4 frames/s -> 1.1 (the countdown), 72% less terminal output while idle. Textual
+  is not needed for this; it would only buy per-cell updates
 - **Watch keybindings**: `r` refreshes now, `q` quits, via cbreak mode on stdin (skipped
   when stdin is not a tty, so cron and pipes are unaffected). Refresh spam is contained
   two ways: a 3s cooldown on manual refreshes, and discarding keys buffered during a fetch
