@@ -14,7 +14,8 @@ blockers, check runs, reviews, and bot activity.
 This delegates to check-pr.sh, so every option it accepts works here. Run
 'gitx pr --help' for the full list, which currently includes:
 
-    -w, --watch         Refresh every 30 seconds
+    -w, --watch         Refresh on an interval; 'r' refreshes now, 'q' quits
+    -i, --interval SECS Watch refresh interval (default: 30)
         --concise       Show only the summary and items needing attention
     -C, --directory DIR Repository directory (defaults to the current one)
 

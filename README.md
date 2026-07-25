@@ -52,7 +52,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 
 # Check status of open PR for current branch
 ./check-pr.sh  # Show one-line merge status plus checks and bot reviews
-./check-pr.sh -w  # Watch mode, refresh every 30 seconds
+./check-pr.sh -w  # Watch mode, refresh every 30 seconds; press r to refresh now, q to quit
 ./check-pr.sh -w -i 10  # Watch mode with a 10-second interval
 ./check-pr.sh --concise  # Show only summary and items needing attention
 ./check-pr.sh /path/to/repo  # Check a PR from another repository directory

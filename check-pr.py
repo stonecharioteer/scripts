@@ -5,13 +5,18 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import io
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
+import sys
+import termios
 import time
+import tty
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -212,6 +217,10 @@ FASTER_RATIO = 0.67
 DURATION_NOISE_SECONDS = 20
 OVERRUN_RATIO = 1.25
 OVERRUN_NOISE_SECONDS = 15
+
+# Cooldown between manual refreshes in watch mode, so holding 'r' cannot turn
+# into a burst of GitHub API calls
+MIN_MANUAL_REFRESH_SECONDS = 3.0
 
 
 def check_trend(row: CheckRow) -> str:
@@ -841,7 +850,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Summarize PR readiness for a git repository.")
     parser.add_argument("directory", nargs="?", help="Repository directory. Defaults to current working directory.")
     parser.add_argument("-C", "--directory", dest="directory_option", help="Repository directory.")
-    parser.add_argument("-w", "--watch", action="store_true", help="Refresh on an interval.")
+    parser.add_argument("-w", "--watch", action="store_true", help="Refresh on an interval; press 'r' to refresh now, 'q' to quit.")
     parser.add_argument("-i", "--interval", type=int, default=30, metavar="SECONDS", help="Watch refresh interval in seconds (default: 30).")
     parser.add_argument("--concise", action="store_true", help="Hide URL/path and passing checks; show only what needs attention.")
     args = parser.parse_args()
@@ -898,12 +907,77 @@ def watch_body(state: PRState | None, message: str | None, *, concise: bool, wid
     return fit_to_height(body, height)
 
 
-def with_watch_footer(body: Text, last_updated: datetime | None, next_refresh: float, warning: str = "") -> Text:
-    remaining = max(0, int(next_refresh - time.monotonic()))
+@contextlib.contextmanager
+def key_reader():
+    """Read single keypresses without waiting for Enter.
+
+    Yields a file descriptor to poll, or None when stdin is not a terminal (a
+    pipe or cron), in which case watch mode simply has no keybindings.
+    """
+    if not sys.stdin.isatty():
+        yield None
+        return
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    try:
+        # cbreak rather than raw: Ctrl-C still raises KeyboardInterrupt
+        tty.setcbreak(fd)
+        yield fd
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
+def wait_for_key(fd: int | None, timeout: float) -> str:
+    """Wait up to timeout seconds for a keypress, returning it (or "")."""
+    if fd is None:
+        time.sleep(timeout)
+        return ""
+    if not select.select([fd], [], [], timeout)[0]:
+        return ""
+    return os.read(fd, 1).decode(errors="ignore")
+
+
+def drain_input(fd: int | None) -> bool:
+    """Discard keys typed while a refresh was running.
+
+    Keys pressed during a fetch are almost always someone impatiently mashing
+    'r'; replaying them would queue a fetch per keypress. Quit is the exception
+    worth honouring, since a refresh can take several seconds.
+    """
+    if fd is None:
+        return False
+    buffered = ""
+    while select.select([fd], [], [], 0)[0]:
+        chunk = os.read(fd, 1024).decode(errors="ignore")
+        if not chunk:
+            break
+        buffered += chunk
+    return "q" in buffered.lower()
+
+
+def with_watch_footer(
+    body: Text,
+    last_updated: datetime | None,
+    next_refresh: float,
+    warning: str = "",
+    *,
+    refreshing: bool = False,
+    keys: bool = False,
+    note: str = "",
+) -> Text:
     updated = last_updated.strftime("%Y-%m-%d %H:%M:%S") if last_updated else "never"
-    footer = f"\nLast updated at {updated} · next update in {remaining}s"
+    footer = f"\nLast updated at {updated}"
+    if refreshing:
+        footer += " · refreshing now..."
+    else:
+        remaining = max(0, int(next_refresh - time.monotonic()))
+        footer += f" · next update in {remaining}s"
+    if note:
+        footer += f" · {note}"
     if warning:
         footer += f" · last refresh failed: {warning}"
+    if keys:
+        footer += " · [r] refresh  [q] quit"
     output = body.copy()
     output.append(footer, style="grey62")
     return output
@@ -917,12 +991,26 @@ def watch(args: argparse.Namespace) -> int:
     warning = ""
     code = 0
     fetched = False
+    last_fetch_at = 0.0
+    note = ""
+    note_until = 0.0
 
-    with Live(console=console, refresh_per_second=4, transient=False) as live:
+    body: Text | None = None
+
+    with key_reader() as key_fd, Live(console=console, refresh_per_second=4, transient=False) as live:
         try:
             while True:
                 now = time.monotonic()
                 if not fetched or now >= next_refresh:
+                    # Say so before blocking on the network, so a manual refresh
+                    # gives immediate feedback instead of a frozen countdown
+                    if body is not None:
+                        live.update(with_watch_footer(
+                            body, last_updated, next_refresh, warning,
+                            refreshing=True, keys=key_fd is not None,
+                        ))
+                    # Push the next automatic refresh out before fetching, so a
+                    # slow fetch cannot re-enter this branch
                     next_refresh = now + args.interval
                     fetched = True
                     try:
@@ -946,6 +1034,17 @@ def watch(args: argparse.Namespace) -> int:
                         if state is None:
                             message = f"[red]{warning}[/]"
 
+                    # Time the interval from the end of the fetch, so a slow
+                    # fetch does not immediately trigger the next one
+                    last_fetch_at = time.monotonic()
+                    next_refresh = last_fetch_at + args.interval
+                    note = ""
+                    if drain_input(key_fd):
+                        break
+
+                if note and time.monotonic() >= note_until:
+                    note = ""
+
                 # Re-render every tick so a resize is picked up without refetching.
                 # Reserve two lines for the footer plus one for the prompt.
                 width, height = console.size
@@ -956,8 +1055,25 @@ def watch(args: argparse.Namespace) -> int:
                     width=width,
                     height=max(1, height - 3),
                 )
-                live.update(with_watch_footer(body, last_updated, next_refresh, warning))
-                time.sleep(1)
+                live.update(with_watch_footer(
+                    body, last_updated, next_refresh, warning,
+                    keys=key_fd is not None, note=note,
+                ))
+
+                # Sleep in one-second ticks so the countdown stays live, but wake
+                # early on a keypress
+                key = wait_for_key(key_fd, 1.0)
+                if key in {"r", "R"}:
+                    since = time.monotonic() - last_fetch_at
+                    if since < MIN_MANUAL_REFRESH_SECONDS:
+                        # Refusing here is what keeps a held-down 'r' from
+                        # turning into a burst of API calls
+                        note = f"refreshed {since:.0f}s ago, ignoring"
+                        note_until = time.monotonic() + 2
+                    else:
+                        next_refresh = time.monotonic()
+                elif key in {"q", "Q"}:
+                    break
         except KeyboardInterrupt:
             console.print("\n[grey62]Interrupted.[/]")
             return 130

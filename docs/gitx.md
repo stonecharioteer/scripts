@@ -197,6 +197,10 @@ gitx pr -w                 # watch mode
 gitx pr -w -i 10           # watch, refreshing every 10 seconds
 ```
 
+In watch mode, `r` refreshes immediately and `q` quits. Manual refreshes have a
+three-second cooldown, and keys pressed while a refresh is in flight are discarded, so
+holding `r` down cannot turn into a burst of API calls.
+
 ### gitignore
 
 Append GitHub's gitignore templates to `./.gitignore`, chosen with gum. Delegates to

@@ -110,6 +110,11 @@ power-monitor's layout) and reworked `check-pr.py`.
   excluded
 - **Review bug**: a COMMENTED review overwrote that user's earlier APPROVED; only
   APPROVED/CHANGES_REQUESTED/DISMISSED are decisive now
+- **Watch keybindings**: `r` refreshes now, `q` quits, via cbreak mode on stdin (skipped
+  when stdin is not a tty, so cron and pipes are unaffected). Refresh spam is contained
+  two ways: a 3s cooldown on manual refreshes, and discarding keys buffered during a fetch
+  (a queued keypress would otherwise become one API burst per press). `q` is still honored
+  from that buffer, since a fetch can take seconds
 - **API calls**: job details came one `gh api` call per check. Run ids are already in the
   check link, so jobs are fetched per _run_ instead: 24 checks over 12 runs went from ~37
   calls to 18, and the branch run-history fetch now overlaps the job listings
