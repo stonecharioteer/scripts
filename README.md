@@ -17,9 +17,10 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 ### Development Tools
 
 - **[ai-usage-collect.py](docs/ai-usage-collect.md)** - Collect ccusage-backed AI coding stats from local/SSH hosts in parallel into append-only per-host ledgers, JSON/CSV, an offline-capable responsive dashboard, and a shareable PNG infographic; run via `ai-usage.sh` so uv resolves matplotlib
-- **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, check runner/machine info, reviews, and bot activity (CodeRabbit, etc.)
+- **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, checks sorted worst-first, runner/machine info, previous-run verdict and timing trend (regressed/fixed/slower), reviews, and bot activity (CodeRabbit, etc.)
 - **[env-diff.sh](docs/env-diff.md)** - Compare `.env` files in a gum table while redacting token-like values
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
+- **[gitx.sh](docs/gitx.md)** - Git workflow dispatcher: branch status, merge-base changed files with +/- counts, conventional branch creation, checkout-free default-branch sync, squash-merge-aware branch cleanup, a PR listing with author and destination branch, and wrappers for check-pr and gi-select
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
 
 ### Notifications
@@ -51,9 +52,23 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 
 # Check status of open PR for current branch
 ./check-pr.sh  # Show one-line merge status plus checks and bot reviews
-./check-pr.sh -w  # Watch mode, refresh every 30 seconds
+./check-pr.sh -w  # Watch mode, refresh every 30 seconds; press r to refresh now, q to quit
+./check-pr.sh -w -i 10  # Watch mode with a 10-second interval
 ./check-pr.sh --concise  # Show only summary and items needing attention
 ./check-pr.sh /path/to/repo  # Check a PR from another repository directory
+
+# Git workflow helpers behind one dispatcher
+./gitx.sh status  # Branch, upstream, default-branch, worktree, stashes
+./gitx.sh status --vs main  # Also compare against a deploy branch that is not the default
+./gitx.sh changed  # Files this branch changed vs the default branch, with +/- counts
+./gitx.sh changed -i  # Pick a branch with fzf, browse its files with a diff preview
+./gitx.sh branch feat add git tools  # Create feat/add-git-tools off an updated main
+./gitx.sh sync --rebase  # Fetch, fast-forward main, rebase the current branch
+./gitx.sh cleanup  # List merged and squash-merged branches (dry run)
+./gitx.sh cleanup --apply  # Delete them after a gum confirmation
+./gitx.sh pr check --concise  # Wraps check-pr.sh
+./gitx.sh pr list  # Open PRs with author and destination branch, off-target ones flagged
+./gitx.sh pr list --base main --mine  # Filter by destination branch and author
 
 # Collect AI coding-agent usage into JSON/CSV stats, ai-usage.html, and a shareable infographic
 ./ai-usage.sh
@@ -98,6 +113,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 | check-pr           | `uv`, `gh`, `git`                                                                                              |
 | env-diff           | `gum`, `awk`, `sort`                                                                                           |
 | gi-select          | `gum`, gitignore repository                                                                                    |
+| gitx               | `git`; `fzf` and `gum` for pickers and prompts; `uv` + `gh` for `pr check`; `gh` + `jq` for `pr list`          |
 | highlight-manager  | `duckdb`, `gum`, `jq`, `python3`                                                                               |
 | ntfy               | `curl`                                                                                                         |
 | simple-notify      | `curl`                                                                                                         |
@@ -126,6 +142,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
    ```
 
 3. **Set up individual scripts** (see respective documentation for detailed setup):
+
    ```bash
    # Audible authentication
    uvx --from audible-cli audible quickstart
@@ -147,6 +164,7 @@ docs/
 ├── ai-usage-collect.md      # AI coding-agent usage collection
 ├── env-diff.md             # Secret-safe env file diffing
 ├── gi-select.md            # Interactive gitignore generation
+├── gitx.md                 # Git workflow dispatcher
 ├── highlight-manager.md     # Kindle highlights management
 ├── ntfy.md                 # Self-hosted ntfy notifications
 ├── simple-notify.md        # Simplepush notifications
