@@ -102,9 +102,9 @@ gitx_remote() {
 # 'development' but which also has a 'main' look like a 'main' repo.
 GITX_DEFAULT_BRANCH_CANDIDATES=(main master development develop trunk mainline)
 
-# Ask the remote which branch its HEAD points at, then cache the answer in
-# refs/remotes/<remote>/HEAD so later runs resolve it locally.
-gitx_remote_head() {
+# Ask the remote which branch its HEAD points at. This does not alter the local
+# refs/remotes/<remote>/HEAD cache.
+gitx_query_remote_head() {
     local remote="$1"
     local ref branch
 
@@ -113,11 +113,39 @@ gitx_remote_head() {
     branch="${ref#refs/heads/}"
     [[ -n "$branch" ]] || return 1
 
+    printf '%s' "$branch"
+}
+
+# Ask the remote which branch its HEAD points at, then cache the answer in
+# refs/remotes/<remote>/HEAD so later runs resolve it locally.
+gitx_remote_head() {
+    local remote="$1"
+    local branch
+
+    branch=$(gitx_query_remote_head "$remote") || return 1
+
     if git show-ref --verify --quiet "refs/remotes/$remote/$branch"; then
         git symbolic-ref "refs/remotes/$remote/HEAD" "refs/remotes/$remote/$branch" 2>/dev/null || true
     fi
 
     printf '%s' "$branch"
+}
+
+# Refuse a default-branch comparison when the remote changed its HEAD but the
+# local refs/remotes/<remote>/HEAD symref still points at the old branch. Stay
+# usable offline: an unreachable remote cannot prove that the cache is stale.
+gitx_assert_remote_head_current() {
+    local remote="$1"
+    local cached_ref cached_branch remote_branch
+
+    [[ -n "$remote" ]] || return 0
+    cached_ref=$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null) || return 0
+    cached_branch="${cached_ref#refs/remotes/"$remote"/}"
+    remote_branch=$(gitx_query_remote_head "$remote") || return 0
+
+    if [[ "$cached_branch" != "$remote_branch" ]]; then
+        error "'$remote' default branch changed from '$cached_branch' to '$remote_branch'; run 'git remote set-head $remote --auto' and retry"
+    fi
 }
 
 # Resolve the default branch: GITX_DEFAULT_BRANCH, then the remote's cached HEAD
