@@ -95,9 +95,13 @@ cmd_changed() {
     if [[ -n "$base_override" ]]; then
         base="$base_override"
     else
-        local default
-        default="$(gitx_require_default_branch)"
-        base="$(gitx_tracking_ref "$default")"
+        local remote default
+        remote="$(gitx_remote)"
+        if [[ -z "${GITX_DEFAULT_BRANCH:-}" ]]; then
+            gitx_assert_remote_head_current "$remote"
+        fi
+        default="$(gitx_require_default_branch "$remote")"
+        base="$(gitx_tracking_ref "$default" "$remote")"
     fi
 
     git rev-parse --verify --quiet "$base^{commit}" >/dev/null \

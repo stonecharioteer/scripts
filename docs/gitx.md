@@ -30,7 +30,8 @@ colors, and interactive pickers.
   `git branch --merged` misses entirely
 - **Default branch detection** - reads the remote's `HEAD` symref, and asks the remote
   directly when a local guess would be ambiguous, so a repo whose default is `development`
-  but which also has a `main` is not mistaken for a `main` repo
+  but which also has a `main` is not mistaken for a `main` repo; `changed` also rejects a
+  stale cached remote `HEAD` before it can compare against the former default branch
 - **Deploy-branch awareness** - `status --vs main` reports where you sit relative to any
   other branch, for repos where the default branch is not the one you ship from
 - **Checkout-free updates** - `sync` fast-forwards the default branch while you stay on
@@ -113,7 +114,12 @@ A ref that does not exist is reported in place rather than being fatal, so a sta
 
 Files a branch changed relative to the default branch, with added/removed line counts.
 The comparison is against the merge base, so commits that landed on the default branch
-afterwards are not reported as your changes.
+afterwards are not reported as your changes. Before using a cached `origin/HEAD`, the
+command checks the remote when it is reachable. If the remote's default branch changed,
+it exits with an error and tells you to refresh the cache with
+`git remote set-head origin --auto`; this prevents merges from the real default branch
+being misreported as feature work. An explicit `--base` or `--default-branch` skips this
+check.
 
 ```bash
 gitx changed                        # current branch vs default branch

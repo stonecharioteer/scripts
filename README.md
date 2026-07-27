@@ -20,7 +20,7 @@ Each script has detailed documentation in the [`docs/`](docs/) folder with compr
 - **[check-pr.sh](check-pr.sh)** - Show one-line GitHub PR merge status with color-coded blockers, checks sorted worst-first, runner/machine info, previous-run verdict and timing trend (regressed/fixed/slower), reviews, and bot activity (CodeRabbit, etc.)
 - **[env-diff.sh](docs/env-diff.md)** - Compare `.env` files in a gum table while redacting token-like values
 - **[gi-select.sh](docs/gi-select.md)** - Interactive .gitignore file generator using GitHub's gitignore templates
-- **[gitx.sh](docs/gitx.md)** - Git workflow dispatcher: branch status, merge-base changed files with +/- counts, conventional branch creation, checkout-free default-branch sync, squash-merge-aware branch cleanup, a PR listing with author and destination branch, and wrappers for check-pr and gi-select
+- **[gitx.sh](docs/gitx.md)** - Git workflow dispatcher: branch status, merge-base changed files with +/- counts and stale remote-HEAD protection, conventional branch creation, checkout-free default-branch sync, squash-merge-aware branch cleanup, a PR listing with author and destination branch, and wrappers for check-pr and gi-select
 - **[highlight-manager.sh](docs/highlight-manager.md)** - Manage Kindle highlights with DuckDB storage and beautiful terminal display
 
 ### Notifications
