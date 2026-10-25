@@ -15,6 +15,15 @@ exclude: |
   )$
 
 repos:
+  - repo: local
+    hooks:
+      - id: test-lid-power-policy
+        name: Test laptop lid power policy
+        language: python
+        entry: python -m unittest discover -s tests -p test_lid_power_policy.py -v
+        files: ^(laptop/lid-power-policy\.py|tests/test_lid_power_policy\.py)$
+        pass_filenames: false
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
